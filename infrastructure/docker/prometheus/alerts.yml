@@ -1,0 +1,132 @@
+# Prometheus Alert Rules
+
+groups:
+  - name: database_alerts
+    interval: 30s
+    rules:
+      # High CPU utilization
+      - alert: HighCPUUsage
+        expr: cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is above 80% for more than 5 minutes"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: memory_usage_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 85% for more than 5 minutes"
+
+      # Database connection issues
+      - alert: TooManyConnections
+        expr: pg_stat_activity_count > 180
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Too many database connections"
+          description: "Database connections exceed 180 (90% of max)"
+
+      # Slow queries
+      - alert: SlowQueries
+        expr: pg_stat_statements_mean_exec_time_ms > 5000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow queries detected"
+          description: "Average query execution time exceeds 5 seconds"
+
+      # Low cache hit rate
+      - alert: LowCacheHitRate
+        expr: pg_cache_hit_ratio < 0.70
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is below 70% for more than 15 minutes"
+
+      # Disk space warning
+      - alert: DiskSpaceWarning
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is below 20%"
+
+      # Critical disk space
+      - alert: DiskSpaceCritical
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical disk space"
+          description: "Disk space is below 10%"
+
+  - name: ml_optimization_alerts
+    interval: 30s
+    rules:
+      # ML service down
+      - alert: MLServiceDown
+        expr: up{job="ml-optimization"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ML Optimization service is down"
+          description: "ML Optimization service has been down for more than 1 minute"
+
+      # High prediction error rate
+      - alert: HighPredictionError
+        expr: ml_prediction_error_rate > 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High prediction error rate"
+          description: "ML model prediction error rate exceeds 10%"
+
+  - name: api_alerts
+    interval: 30s
+    rules:
+      # API Gateway down
+      - alert: APIGatewayDown
+        expr: up{job="api-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API Gateway is down"
+          description: "API Gateway has been down for more than 1 minute"
+
+      # High API error rate
+      - alert: HighAPIErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API error rate"
+          description: "API error rate exceeds 5% for more than 5 minutes"
+
+      # High API latency
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1.0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency"
+          description: "95th percentile API latency exceeds 1 second"
+

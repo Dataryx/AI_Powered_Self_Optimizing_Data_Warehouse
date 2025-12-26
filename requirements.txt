@@ -1,0 +1,34 @@
+# Core Dependencies
+python-dotenv>=1.0.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Database
+psycopg2-binary>=2.9.6
+sqlalchemy>=2.0.0
+alembic>=1.11.0
+
+# Data Generation
+faker>=19.0.0
+
+# ETL
+apache-airflow>=2.7.0
+
+# ML/Optimization (Phase 2)
+# scikit-learn>=1.3.0
+# tensorflow>=2.13.0
+# xgboost>=1.7.0
+
+# API
+# fastapi>=0.100.0
+# uvicorn>=0.23.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Utilities
+pyyaml>=6.0
+
