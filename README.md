@@ -91,7 +91,7 @@ An intelligent data warehouse system that automatically analyzes query patterns,
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/Dataryx/AI_Powered_Self_Optimizing_Data_Warehouse.git
    cd AI-Powered-Self_Optimizing_Data_Warehouse
    ```
 
