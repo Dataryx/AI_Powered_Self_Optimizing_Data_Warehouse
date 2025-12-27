@@ -1,42 +1,34 @@
-/**
- * Optimizations Page
- * Page for viewing and managing optimization recommendations.
- */
-
 import React from 'react';
-import { Box, Grid, Paper } from '@mui/material';
-import { IndexRecommendations } from '../components/optimization/IndexRecommendations';
-import { PartitionRecommendations } from '../components/optimization/PartitionRecommendations';
-import { CacheAnalytics } from '../components/optimization/CacheAnalytics';
-import { OptimizationDecisionLog } from '../components/optimization/OptimizationDecisionLog';
+import { Box, Typography, Card, CardContent } from '@mui/material';
 
-export const OptimizationsPage: React.FC = () => {
+const OptimizationsPage: React.FC = () => {
   return (
-    <Box sx={{ flexGrow: 1, p: 3 }}>
-      <Grid container spacing={3}>
-        <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
-            <IndexRecommendations />
-          </Paper>
-        </Grid>
-        <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
-            <PartitionRecommendations />
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <CacheAnalytics />
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <OptimizationDecisionLog />
-          </Paper>
-        </Grid>
-      </Grid>
+    <Box sx={{ width: '100%' }}>
+      <Typography
+        variant="h4"
+        gutterBottom
+        sx={{
+          fontWeight: 800,
+          mb: 4,
+          color: '#ffffff',
+          letterSpacing: '-0.02em',
+        }}
+      >
+        Optimizations
+      </Typography>
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ color: '#ffffff' }}>
+            Optimization Recommendations
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Optimization recommendations will be displayed here.
+          </Typography>
+        </CardContent>
+      </Card>
     </Box>
   );
 };
 
 export default OptimizationsPage;
+

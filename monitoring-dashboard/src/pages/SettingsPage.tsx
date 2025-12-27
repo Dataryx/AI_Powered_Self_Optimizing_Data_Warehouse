@@ -1,24 +1,34 @@
-/**
- * Settings Page
- * Page for application settings and configuration.
- */
-
 import React from 'react';
-import { Box, Paper, Typography } from '@mui/material';
+import { Box, Typography, Card, CardContent } from '@mui/material';
 
-export const SettingsPage: React.FC = () => {
+const SettingsPage: React.FC = () => {
   return (
-    <Box sx={{ flexGrow: 1, p: 3 }}>
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          Settings
-        </Typography>
-        <Typography color="text.secondary">
-          Settings page coming soon
-        </Typography>
-      </Paper>
+    <Box sx={{ width: '100%' }}>
+      <Typography
+        variant="h4"
+        gutterBottom
+        sx={{
+          fontWeight: 800,
+          mb: 4,
+          color: '#ffffff',
+          letterSpacing: '-0.02em',
+        }}
+      >
+        Settings
+      </Typography>
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ color: '#ffffff' }}>
+            System Settings
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Configuration and settings will be displayed here.
+          </Typography>
+        </CardContent>
+      </Card>
     </Box>
   );
 };
 
 export default SettingsPage;
+

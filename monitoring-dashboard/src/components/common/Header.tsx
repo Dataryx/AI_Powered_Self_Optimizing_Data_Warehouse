@@ -1,87 +1,147 @@
-/**
- * Header Component
- * Top navigation bar with status indicators and user menu.
- */
-
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AppBar,
   Toolbar,
   Typography,
   Box,
   IconButton,
-  Badge,
+  Avatar,
   Chip,
+  Badge,
+  Tooltip,
 } from '@mui/material';
 import {
+  Dashboard as DashboardIcon,
   Notifications as NotificationsIcon,
   Settings as SettingsIcon,
-  Dashboard as DashboardIcon,
 } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
 
-interface HeaderProps {
-  activeAlertsCount?: number;
-  systemStatus?: 'healthy' | 'degraded' | 'unhealthy';
-}
+export const Header: React.FC = () => {
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-export const Header: React.FC<HeaderProps> = ({
-  activeAlertsCount = 0,
-  systemStatus = 'healthy',
-}) => {
-  const navigate = useNavigate();
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'healthy':
-        return 'success';
-      case 'degraded':
-        return 'warning';
-      case 'unhealthy':
-        return 'error';
-      default:
-        return 'default';
-    }
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
   };
 
   return (
-    <AppBar position="static" elevation={0}>
-      <Toolbar>
-        <DashboardIcon sx={{ mr: 2 }} />
-        <Typography variant="h6" component="div" sx={{ flexGrow: 0, mr: 4 }}>
-          Data Warehouse Monitor
-        </Typography>
+    <AppBar
+      position="fixed"
+      elevation={0}
+      sx={{
+        background: 'rgba(10, 10, 15, 0.95)',
+        backdropFilter: 'blur(20px)',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        zIndex: (theme) => theme.zIndex.drawer + 1,
+      }}
+    >
+      <Toolbar sx={{ px: 3, justifyContent: 'space-between' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box
+            sx={{
+              width: 48,
+              height: 48,
+              borderRadius: 3,
+              background: 'linear-gradient(135deg, #6366f1 0%, #ec4899 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 20px rgba(99, 102, 241, 0.4)',
+            }}
+          >
+            <DashboardIcon sx={{ color: 'white', fontSize: 28 }} />
+          </Box>
+          <Box>
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 800,
+                background: 'linear-gradient(135deg, #6366f1 0%, #ec4899 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                letterSpacing: '-0.02em',
+              }}
+            >
+              Data Warehouse Monitor
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+              AI-Powered Optimization
+            </Typography>
+          </Box>
+        </Box>
 
-        <Box sx={{ flexGrow: 1 }} />
-
-        <Chip
-          label={systemStatus.toUpperCase()}
-          color={getStatusColor(systemStatus) as any}
-          size="small"
-          sx={{ mr: 2 }}
-        />
-
-        <IconButton
-          color="inherit"
-          onClick={() => navigate('/alerts')}
-          sx={{ mr: 1 }}
-        >
-          <Badge badgeContent={activeAlertsCount} color="error">
-            <NotificationsIcon />
-          </Badge>
-        </IconButton>
-
-        <IconButton
-          color="inherit"
-          onClick={() => navigate('/settings')}
-        >
-          <SettingsIcon />
-        </IconButton>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Chip
+            label={formatTime(currentTime)}
+            sx={{
+              background: 'rgba(99, 102, 241, 0.1)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              color: '#818cf8',
+              fontWeight: 600,
+              fontFamily: 'monospace',
+            }}
+          />
+          <Chip
+            label="HEALTHY"
+            color="success"
+            sx={{
+              fontWeight: 700,
+              boxShadow: '0 0 20px rgba(16, 185, 129, 0.3)',
+            }}
+          />
+          <Tooltip title="Notifications">
+            <IconButton
+              sx={{
+                background: 'rgba(99, 102, 241, 0.1)',
+                border: '1px solid rgba(99, 102, 241, 0.2)',
+                '&:hover': {
+                  background: 'rgba(99, 102, 241, 0.2)',
+                },
+              }}
+            >
+              <Badge badgeContent={3} color="error">
+                <NotificationsIcon />
+              </Badge>
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Settings">
+            <IconButton
+              sx={{
+                background: 'rgba(99, 102, 241, 0.1)',
+                border: '1px solid rgba(99, 102, 241, 0.2)',
+                '&:hover': {
+                  background: 'rgba(99, 102, 241, 0.2)',
+                },
+              }}
+            >
+              <SettingsIcon />
+            </IconButton>
+          </Tooltip>
+          <Avatar
+            sx={{
+              background: 'linear-gradient(135deg, #6366f1 0%, #ec4899 100%)',
+              width: 40,
+              height: 40,
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.4)',
+            }}
+          >
+            A
+          </Avatar>
+        </Box>
       </Toolbar>
     </AppBar>
   );
 };
-
-export default Header;
-
 

@@ -1,2 +1,0 @@
-// Cost benefit analysis component
-

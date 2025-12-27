@@ -1,30 +1,34 @@
-/**
- * Alerts Page
- * Page for viewing and managing alerts.
- */
-
 import React from 'react';
-import { Box, Grid, Paper } from '@mui/material';
-import { AnomalyAlerts } from '../components/alerts/AnomalyAlerts';
-import { SystemHealthAlerts } from '../components/alerts/SystemHealthAlerts';
+import { Box, Typography, Card, CardContent } from '@mui/material';
 
-export const AlertsPage: React.FC = () => {
+const AlertsPage: React.FC = () => {
   return (
-    <Box sx={{ flexGrow: 1, p: 3 }}>
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <AnomalyAlerts />
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <SystemHealthAlerts />
-          </Paper>
-        </Grid>
-      </Grid>
+    <Box sx={{ width: '100%' }}>
+      <Typography
+        variant="h4"
+        gutterBottom
+        sx={{
+          fontWeight: 800,
+          mb: 4,
+          color: '#ffffff',
+          letterSpacing: '-0.02em',
+        }}
+      >
+        Alerts
+      </Typography>
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ color: '#ffffff' }}>
+            System Alerts
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Active alerts and notifications will be displayed here.
+          </Typography>
+        </CardContent>
+      </Card>
     </Box>
   );
 };
 
 export default AlertsPage;
+

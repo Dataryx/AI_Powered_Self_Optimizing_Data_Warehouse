@@ -1,36 +1,34 @@
-/**
- * Analytics Page
- * Page for viewing analytics and insights.
- */
-
 import React from 'react';
-import { Box, Grid, Paper } from '@mui/material';
-import { QueryAnalytics } from '../components/analytics/QueryAnalytics';
-import { UsageAnalytics } from '../components/analytics/UsageAnalytics';
-import { CostBenefitAnalysis } from '../components/analytics/CostBenefitAnalysis';
+import { Box, Typography, Card, CardContent } from '@mui/material';
 
-export const AnalyticsPage: React.FC = () => {
+const AnalyticsPage: React.FC = () => {
   return (
-    <Box sx={{ flexGrow: 1, p: 3 }}>
-      <Grid container spacing={3}>
-        <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
-            <QueryAnalytics />
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <UsageAnalytics />
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <CostBenefitAnalysis />
-          </Paper>
-        </Grid>
-      </Grid>
+    <Box sx={{ width: '100%' }}>
+      <Typography
+        variant="h4"
+        gutterBottom
+        sx={{
+          fontWeight: 800,
+          mb: 4,
+          color: '#ffffff',
+          letterSpacing: '-0.02em',
+        }}
+      >
+        Analytics
+      </Typography>
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ color: '#ffffff' }}>
+            Analytics Dashboard
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Analytics data and insights will be displayed here.
+          </Typography>
+        </CardContent>
+      </Card>
     </Box>
   );
 };
 
 export default AnalyticsPage;
+
