@@ -163,3 +163,4 @@ conn = psycopg2.connect(
 3. View **Database** using Adminer at http://localhost:8080
 4. Monitor metrics in **Grafana** at http://localhost:3000
 
+

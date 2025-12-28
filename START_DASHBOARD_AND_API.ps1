@@ -14,22 +14,22 @@ Set-Location $scriptDir
 Write-Host "[1/2] Starting API Gateway..." -ForegroundColor Yellow
 $apiDir = Join-Path $scriptDir "api-gateway"
 if (Test-Path $apiDir) {
-    Set-Location $apiDir
-    
     # Check if virtual environment exists, if not install dependencies
-    if (-not (Test-Path "venv")) {
+    if (-not (Test-Path (Join-Path $apiDir "venv"))) {
         Write-Host "Installing API Gateway dependencies..." -ForegroundColor Gray
+        Set-Location $apiDir
         python -m pip install -r requirements.txt
+        Set-Location $scriptDir
     }
     
-    # Start API Gateway in new window
+    # Start API Gateway in new window from api-gateway directory
     Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$apiDir'; Write-Host 'API Gateway Starting...' -ForegroundColor Green; python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
-    Write-Host "✓ API Gateway started (new window)" -ForegroundColor Green
+    Write-Host "API Gateway started (new window)" -ForegroundColor Green
     Write-Host "  URL: http://localhost:8000" -ForegroundColor Gray
     Write-Host "  Docs: http://localhost:8000/docs" -ForegroundColor Gray
     Start-Sleep -Seconds 3
 } else {
-    Write-Host "✗ API Gateway directory not found" -ForegroundColor Red
+    Write-Host "API Gateway directory not found" -ForegroundColor Red
 }
 
 # Start Dashboard

@@ -9,8 +9,14 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-from api_gateway.routes import warehouse_routes, optimization_routes, monitoring_routes
-from api_gateway.websocket import realtime_handler
+try:
+    # Try absolute import (when run from parent directory)
+    from api_gateway.routes import warehouse_routes, optimization_routes, monitoring_routes, dashboard_routes
+    from api_gateway.websocket import realtime_handler
+except ImportError:
+    # Fall back to relative imports (when run from api-gateway directory)
+    from routes import warehouse_routes, optimization_routes, monitoring_routes, dashboard_routes
+    from websocket import realtime_handler
 
 # Configure logging
 logging.basicConfig(
@@ -76,6 +82,13 @@ app.include_router(
     tags=["Monitoring"]
 )
 
+# Include dashboard routes
+app.include_router(
+    dashboard_routes.router,
+    prefix="/api/v1/dashboard",
+    tags=["Dashboard"]
+)
+
 
 @app.get("/")
 async def root():
@@ -88,6 +101,7 @@ async def root():
             "warehouse": "/api/v1/warehouse",
             "optimization": "/api/v1/optimization",
             "monitoring": "/api/v1/monitoring",
+            "dashboard": "/api/v1/dashboard",
             "websocket": "/ws/{client_id}",
             "docs": "/docs",
         }

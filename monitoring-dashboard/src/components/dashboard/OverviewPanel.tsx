@@ -1,5 +1,5 @@
-import React from 'react';
-import { Grid } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Grid, CircularProgress, Box } from '@mui/material';
 import {
   QueryStats as QueryStatsIcon,
   Speed as SpeedIcon,
@@ -7,41 +7,85 @@ import {
   Warning as WarningIcon,
 } from '@mui/icons-material';
 import { MetricCard } from './MetricCard';
+import { getDashboardMetrics } from '../../services/api';
+
+const formatNumber = (num: number): string => {
+  if (num >= 1000000) {
+    return `${(num / 1000000).toFixed(1)}M`;
+  } else if (num >= 1000) {
+    return `${(num / 1000).toFixed(1)}K`;
+  }
+  return num.toString();
+};
 
 export const OverviewPanel: React.FC = () => {
-  const metrics = [
+  const [metrics, setMetrics] = useState({
+    queriesToday: 0,
+    avgResponseTime: 0,
+    optimizationSavings: 0,
+    activeAlerts: 0,
+    queriesChange: 0,
+    responseTimeChange: 0,
+    savingsChange: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      try {
+        setLoading(true);
+        const data = await getDashboardMetrics();
+        setMetrics(data);
+      } catch (error) {
+        console.error('Error loading dashboard metrics:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMetrics();
+    // Refresh metrics every 30 seconds
+    const interval = setInterval(fetchMetrics, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+        <CircularProgress size={40} sx={{ color: 'rgba(255, 255, 255, 0.5)' }} />
+      </Box>
+    );
+  }
+
+  const metricCards = [
     {
       title: 'Total Queries',
-      value: '15.2K',
-      change: 12.5,
-      icon: <QueryStatsIcon sx={{ fontSize: 32, color: 'white' }} />,
-      gradient: 'rgba(99, 102, 241, 0.8) 0%, rgba(139, 92, 246, 0.8) 100%',
+      value: formatNumber(metrics.queriesToday),
+      change: metrics.queriesChange,
+      icon: <QueryStatsIcon sx={{ fontSize: 24, color: 'rgba(255, 255, 255, 0.8)' }} />,
     },
     {
       title: 'Avg Response Time',
-      value: '145ms',
-      change: -8.3,
-      icon: <SpeedIcon sx={{ fontSize: 32, color: 'white' }} />,
-      gradient: 'rgba(16, 185, 129, 0.8) 0%, rgba(52, 211, 153, 0.8) 100%',
+      value: `${Math.round(metrics.avgResponseTime)}ms`,
+      change: metrics.responseTimeChange,
+      icon: <SpeedIcon sx={{ fontSize: 24, color: 'rgba(255, 255, 255, 0.8)' }} />,
     },
     {
       title: 'Optimization Savings',
-      value: '23.5%',
-      change: 3.2,
-      icon: <TrendingUpIcon sx={{ fontSize: 32, color: 'white' }} />,
-      gradient: 'rgba(236, 72, 153, 0.8) 0%, rgba(244, 114, 182, 0.8) 100%',
+      value: `${metrics.optimizationSavings.toFixed(1)}%`,
+      change: metrics.savingsChange,
+      icon: <TrendingUpIcon sx={{ fontSize: 24, color: 'rgba(255, 255, 255, 0.8)' }} />,
     },
     {
       title: 'Active Alerts',
-      value: '2',
-      icon: <WarningIcon sx={{ fontSize: 32, color: 'white' }} />,
-      gradient: 'rgba(245, 158, 11, 0.8) 0%, rgba(251, 191, 36, 0.8) 100%',
+      value: metrics.activeAlerts.toString(),
+      icon: <WarningIcon sx={{ fontSize: 24, color: 'rgba(255, 255, 255, 0.8)' }} />,
     },
   ];
 
   return (
     <Grid container spacing={3}>
-      {metrics.map((metric, index) => (
+      {metricCards.map((metric, index) => (
         <Grid item xs={12} sm={6} lg={3} key={index}>
           <MetricCard {...metric} />
         </Grid>

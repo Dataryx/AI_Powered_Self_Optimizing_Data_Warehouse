@@ -1,20 +1,55 @@
-import React from 'react';
-import { Card, CardContent, Typography, Box, LinearProgress, Grid } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, Typography, Box, LinearProgress, Grid, CircularProgress } from '@mui/material';
 import {
   Memory as MemoryIcon,
   Storage as StorageIcon,
   Speed as SpeedIcon,
   NetworkCheck as NetworkIcon,
 } from '@mui/icons-material';
-
-const resources = [
-  { name: 'CPU', value: 45.2, icon: <SpeedIcon />, color: '#6366f1' },
-  { name: 'Memory', value: 67.8, icon: <MemoryIcon />, color: '#ec4899' },
-  { name: 'Disk', value: 34.5, icon: <StorageIcon />, color: '#10b981' },
-  { name: 'Network', value: 23.1, icon: <NetworkIcon />, color: '#f59e0b' },
-];
+import { getResourceUtilization, ResourceUtilization as ResourceUtilizationType } from '../../services/api';
 
 export const ResourceUtilization: React.FC = () => {
+  const [resources, setResources] = useState([
+    { name: 'CPU', value: 0, icon: <SpeedIcon />, color: '#64748b' },
+    { name: 'Memory', value: 0, icon: <MemoryIcon />, color: '#94a3b8' },
+    { name: 'Disk', value: 0, icon: <StorageIcon />, color: '#cbd5e1' },
+    { name: 'Network', value: 0, icon: <NetworkIcon />, color: '#e2e8f0' },
+  ]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const data = await getResourceUtilization();
+        setResources([
+          { name: 'CPU', value: data.cpu, icon: <SpeedIcon />, color: '#64748b' },
+          { name: 'Memory', value: data.memory, icon: <MemoryIcon />, color: '#94a3b8' },
+          { name: 'Disk', value: data.disk, icon: <StorageIcon />, color: '#cbd5e1' },
+          { name: 'Network', value: data.network, icon: <NetworkIcon />, color: '#e2e8f0' },
+        ]);
+      } catch (error) {
+        console.error('Error loading resource utilization:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+  if (loading) {
+    return (
+      <Card sx={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
+        <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pb: 3 }}>
+          <CircularProgress size={40} sx={{ color: 'rgba(255, 255, 255, 0.5)' }} />
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card sx={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
       <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', pb: 3 }}>
@@ -39,26 +74,25 @@ export const ResourceUtilization: React.FC = () => {
                   borderRadius: 2,
                   background: 'rgba(255, 255, 255, 0.03)',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
-                  transition: 'all 0.3s ease',
+                  transition: 'all 0.2s ease',
                   '&:hover': {
                     background: 'rgba(255, 255, 255, 0.05)',
-                    borderColor: `${resource.color}40`,
-                    transform: 'translateY(-2px)',
+                    borderColor: 'rgba(255, 255, 255, 0.15)',
                   },
                 }}
               >
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
                   <Box
                     sx={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 2,
-                      background: `linear-gradient(135deg, ${resource.color}20 0%, ${resource.color}10 100%)`,
+                      width: 40,
+                      height: 40,
+                      borderRadius: 1.5,
+                      background: 'rgba(255, 255, 255, 0.05)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: resource.color,
-                      border: `1px solid ${resource.color}30`,
+                      color: 'rgba(255, 255, 255, 0.7)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
                     }}
                   >
                     {resource.icon}
@@ -68,8 +102,8 @@ export const ResourceUtilization: React.FC = () => {
                       variant="body2" 
                       sx={{ 
                         mb: 0.5, 
-                        color: 'rgba(255, 255, 255, 0.7)',
-                        fontWeight: 500,
+                        color: 'rgba(255, 255, 255, 0.6)',
+                        fontWeight: 400,
                         fontSize: '0.875rem',
                       }}
                     >
@@ -78,8 +112,8 @@ export const ResourceUtilization: React.FC = () => {
                     <Typography 
                       variant="h5" 
                       sx={{ 
-                        fontWeight: 700, 
-                        color: resource.color,
+                        fontWeight: 600, 
+                        color: 'rgba(255, 255, 255, 0.95)',
                         fontSize: '1.5rem',
                       }}
                     >
@@ -91,14 +125,13 @@ export const ResourceUtilization: React.FC = () => {
                   variant="determinate"
                   value={resource.value}
                   sx={{
-                    height: 10,
-                    borderRadius: 5,
+                    height: 8,
+                    borderRadius: 4,
                     background: 'rgba(255, 255, 255, 0.1)',
                     overflow: 'hidden',
                     '& .MuiLinearProgress-bar': {
-                      background: `linear-gradient(90deg, ${resource.color} 0%, ${resource.color}CC 100%)`,
-                      borderRadius: 5,
-                      boxShadow: `0 0 12px ${resource.color}50`,
+                      background: resource.color,
+                      borderRadius: 4,
                     },
                   }}
                 />

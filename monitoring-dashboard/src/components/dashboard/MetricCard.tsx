@@ -24,34 +24,29 @@ export const MetricCard: React.FC<MetricCardProps> = ({
       sx={{
         height: '100%',
         width: '100%',
-        background: `linear-gradient(135deg, ${gradient})`,
-        position: 'relative',
-        overflow: 'visible',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 4,
-          background: gradient,
-          borderRadius: '16px 16px 0 0',
+        background: 'rgba(17, 17, 26, 0.95)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: 2,
+        transition: 'all 0.2s ease',
+        '&:hover': {
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
         },
       }}
     >
       <CardContent sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2.5 }}>
           <Box
             sx={{
-              width: 56,
-              height: 56,
-              borderRadius: 2,
-              background: 'rgba(255, 255, 255, 0.1)',
-              backdropFilter: 'blur(10px)',
+              width: 48,
+              height: 48,
+              borderRadius: 1.5,
+              background: 'rgba(255, 255, 255, 0.05)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              color: 'rgba(255, 255, 255, 0.8)',
             }}
           >
             {icon}
@@ -62,26 +57,31 @@ export const MetricCard: React.FC<MetricCardProps> = ({
               label={`${isPositive ? '+' : ''}${change.toFixed(1)}%`}
               size="small"
               sx={{
-                background: isPositive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                color: isPositive ? '#34d399' : '#f87171',
-                fontWeight: 600,
-                border: `1px solid ${isPositive ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                background: isPositive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                color: isPositive ? 'rgba(16, 185, 129, 0.9)' : 'rgba(239, 68, 68, 0.9)',
+                fontWeight: 500,
+                fontSize: '0.75rem',
+                border: `1px solid ${isPositive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+                '& .MuiChip-icon': {
+                  color: 'inherit',
+                },
               }}
             />
           )}
         </Box>
         <Typography
-          variant="h3"
+          variant="h4"
           sx={{
-            fontWeight: 800,
+            fontWeight: 600,
             mb: 0.5,
             color: '#ffffff',
-            letterSpacing: '-0.02em',
+            letterSpacing: '-0.01em',
+            fontSize: '1.75rem',
           }}
         >
           {value}
         </Typography>
-        <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', fontWeight: 500 }}>
+        <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 400, fontSize: '0.875rem' }}>
           {title}
         </Typography>
       </CardContent>
