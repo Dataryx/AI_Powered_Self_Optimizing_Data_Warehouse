@@ -1,23 +1,136 @@
-import React from 'react';
+/**
+ * Main App Component
+ * Root component with routing and layout.
+ */
+
+import React from 'react'; // eslint-disable-line @typescript-eslint/no-unused-vars
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider } from '@mui/material/styles';
-import { CssBaseline, Box } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
+import { Provider } from 'react-redux';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { store } from './store';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
-import { theme } from './styles/theme';
-import DashboardPage from './pages/DashboardPage';
-import OptimizationsPage from './pages/OptimizationsPage';
-import AnalyticsPage from './pages/AnalyticsPage';
-import AlertsPage from './pages/AlertsPage';
-import SettingsPage from './pages/SettingsPage';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { DashboardPage } from './pages/DashboardPage';
+import { MonitoringDashboard } from './pages/MonitoringDashboard';
+import { StorageDashboard } from './pages/StorageDashboard';
+import { OptimizationsPage } from './pages/OptimizationsPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
+import { AlertsPage } from './pages/AlertsPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { DataExplorerPage } from './pages/DataExplorerPage';
+import { Box } from '@mui/material';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
+      refetchOnMount: false,
+      refetchOnReconnect: false,
       retry: 1,
+      staleTime: 30000, // Consider data fresh for 30 seconds
+    },
+  },
+});
+
+const theme = createTheme({
+  palette: {
+    mode: 'light',
+    primary: {
+      main: '#6366f1', // Indigo
+      light: '#818cf8',
+      dark: '#4f46e5',
+    },
+    secondary: {
+      main: '#ec4899', // Pink
+      light: '#f472b6',
+      dark: '#db2777',
+    },
+    background: {
+      default: '#f8fafc',
+      paper: '#ffffff',
+    },
+    text: {
+      primary: '#1e293b',
+      secondary: '#64748b',
+    },
+  },
+  typography: {
+    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+    h1: {
+      fontWeight: 700,
+      letterSpacing: '-0.02em',
+    },
+    h2: {
+      fontWeight: 700,
+      letterSpacing: '-0.02em',
+    },
+    h3: {
+      fontWeight: 700,
+      letterSpacing: '-0.01em',
+    },
+    h4: {
+      fontWeight: 600,
+      letterSpacing: '-0.01em',
+    },
+    h5: {
+      fontWeight: 600,
+    },
+    h6: {
+      fontWeight: 600,
+    },
+    button: {
+      textTransform: 'none',
+      fontWeight: 600,
+    },
+  },
+  shape: {
+    borderRadius: 16,
+  },
+  shadows: [
+    'none',
+    '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+    '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+    '0 10px 15px -3px rgba(0, 0, 0, 0.08)',
+    '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+    '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+  ] as any,
+  components: {
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          borderRadius: 16,
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.08)',
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 12,
+          padding: '10px 24px',
+        },
+      },
     },
   },
 });
@@ -26,40 +139,42 @@ function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider theme={theme}>
-          <CssBaseline />
-          <Router>
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                minHeight: '100vh',
-              background: '#0a0a0f',
-              backgroundImage: 
-                'radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(236, 72, 153, 0.1) 0px, transparent 50%)',
-              backgroundAttachment: 'fixed',
-              }}
-            >
-              <Header />
-              <Box sx={{ display: 'flex', flex: 1, mt: '64px' }}>
+        <Provider store={store}>
+          <ThemeProvider theme={theme}>
+            <CssBaseline />
+            <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+                <Header />
                 <Sidebar />
                 <Box
                   component="main"
                   sx={{
                     flexGrow: 1,
-                    p: 4,
-                    ml: { sm: '280px' },
+                    p: 0,
+                    mt: 8,
+                    ml: { sm: '70px' },
+                    background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
                     minHeight: 'calc(100vh - 64px)',
-                    width: { sm: 'calc(100% - 280px)' },
-                    maxWidth: { sm: 'calc(100% - 280px)' },
-                    boxSizing: 'border-box',
-                    overflowX: 'hidden',
+                    position: 'relative',
+                    '&::before': {
+                      content: '""',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: '200px',
+                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      opacity: 0.03,
+                      pointerEvents: 'none',
+                    },
                   }}
-                  className="fade-in"
                 >
                   <Routes>
                     <Route path="/" element={<Navigate to="/dashboard" replace />} />
                     <Route path="/dashboard" element={<DashboardPage />} />
+                    <Route path="/monitoring" element={<MonitoringDashboard />} />
+                    <Route path="/storage" element={<StorageDashboard />} />
+                    <Route path="/data" element={<DataExplorerPage />} />
                     <Route path="/optimizations" element={<OptimizationsPage />} />
                     <Route path="/analytics" element={<AnalyticsPage />} />
                     <Route path="/alerts" element={<AlertsPage />} />
@@ -67,12 +182,14 @@ function App() {
                   </Routes>
                 </Box>
               </Box>
-            </Box>
-          </Router>
+            </Router>
         </ThemeProvider>
+      </Provider>
       </QueryClientProvider>
     </ErrorBoundary>
   );
 }
 
 export default App;
+
+

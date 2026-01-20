@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-from ml_optimization.api.routes import optimization_routes, metrics_routes, recommendation_routes
+from ml_optimization.api.routes import optimization_routes, metrics_routes, recommendation_routes, warehouse_routes, monitoring_routes, storage_routes, alert_routes
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,10 @@ app.add_middleware(
 app.include_router(optimization_routes.router, prefix="/api/v1/optimization", tags=["Optimization"])
 app.include_router(metrics_routes.router, prefix="/api/v1/metrics", tags=["Metrics"])
 app.include_router(recommendation_routes.router, prefix="/api/v1/recommendations", tags=["Recommendations"])
+app.include_router(warehouse_routes.router, prefix="/api/v1/warehouse", tags=["Data Warehouse"])
+app.include_router(monitoring_routes.router, prefix="/api/v1/monitoring", tags=["Monitoring"])
+app.include_router(storage_routes.router, prefix="/api/v1/storage", tags=["Storage"])
+app.include_router(alert_routes.router, prefix="/api/v1/alerts", tags=["Alerts"])
 
 
 @app.get("/")
@@ -60,20 +64,44 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "ML Optimization API"
-    }
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "ML Optimization API"
-    }
+    """Health check endpoint with database connection test."""
+    try:
+        from ml_optimization.utils.db_utils import get_db_connection
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT current_database(), version()")
+            db_name, version = cursor.fetchone()
+            
+            # Check for data warehouse schemas
+            cursor.execute("""
+                SELECT schemaname, COUNT(*) as table_count
+                FROM pg_tables 
+                WHERE schemaname IN ('bronze', 'silver', 'gold')
+                GROUP BY schemaname
+                ORDER BY schemaname
+            """)
+            schemas = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            return {
+                "status": "healthy",
+                "service": "ML Optimization API",
+                "database": {
+                    "name": db_name,
+                    "version": version.split(',')[0] if version else "Unknown",
+                    "connected": True,
+                    "schemas": schemas
+                }
+            }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "service": "ML Optimization API",
+            "error": str(e),
+            "database": {
+                "connected": False
+            }
+        }
 
 
 if __name__ == "__main__":

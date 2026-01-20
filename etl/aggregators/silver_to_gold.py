@@ -1,12 +1,14 @@
 """
 Silver to Gold Layer Aggregator
 Aggregates Silver layer data into Gold layer analytics tables.
+Updated to work with the actual schema: gold.agg_daily_sales, gold.agg_customer_lifetime, etc.
 """
 
 import psycopg2
 from datetime import datetime, date, timedelta
 from typing import Dict, Any
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -19,286 +21,347 @@ class SilverToGoldAggregator:
         self.connection = connection
         self.cursor = connection.cursor()
     
-    def aggregate_daily_sales_summary(self, target_date: date = None):
-        """Aggregate daily sales summary for a specific date."""
+    def table_is_empty(self, schema: str, table: str) -> bool:
+        """Check if a table is empty."""
+        try:
+            self.cursor.execute(f"SELECT 1 FROM {schema}.{table} LIMIT 1;")
+            return self.cursor.fetchone() is None
+        except Exception as e:
+            logger.error(f"Error checking if {schema}.{table} is empty: {e}")
+            return False
+    
+    def aggregate_daily_sales(self, target_date: date = None):
+        """Aggregate daily sales for a specific date into gold.agg_daily_sales."""
         if target_date is None:
             target_date = date.today() - timedelta(days=1)
         
-        logger.info(f"Aggregating daily sales summary for {target_date}...")
+        logger.info(f"Aggregating daily sales for {target_date}...")
+        
+        # Convert date to date_key (YYYYMMDD format)
+        date_key = int(target_date.strftime('%Y%m%d'))
+        
+        # Check if date dimension exists, create if not
+        self.cursor.execute("SELECT 1 FROM gold.dim_date WHERE date_key = %s", (date_key,))
+        if not self.cursor.fetchone():
+            # Create date dimension entry
+            day_of_week = target_date.weekday() + 1  # Monday = 1
+            day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            month_names = ['January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December']
+            month_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            
+            self.cursor.execute("""
+                INSERT INTO gold.dim_date (
+                    date_key, full_date, day_of_week, day_name, day_of_month, day_of_year,
+                    week_of_year, month_number, month_name, month_short_name,
+                    quarter_number, quarter_name, year_number, is_weekend
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                date_key, target_date, day_of_week, day_names[target_date.weekday()],
+                target_date.day, target_date.timetuple().tm_yday,
+                target_date.isocalendar()[1], target_date.month,
+                month_names[target_date.month - 1], month_short[target_date.month - 1],
+                (target_date.month - 1) // 3 + 1, f"Q{(target_date.month - 1) // 3 + 1}",
+                target_date.year, target_date.weekday() >= 5
+            ))
+            self.connection.commit()
         
         # Delete existing record for this date
         self.cursor.execute(
-            "DELETE FROM gold.daily_sales_summary WHERE date_key = %s",
-            (target_date,)
+            "DELETE FROM gold.agg_daily_sales WHERE date_key = %s",
+            (date_key,)
         )
         
-        # Aggregate sales data
+        # Aggregate sales data from Silver layer
         aggregate_query = """
-            INSERT INTO gold.daily_sales_summary (
-                date_key, total_orders, total_revenue, total_items_sold,
-                average_order_value, unique_customers, new_customers,
-                returning_customers, top_category, top_product_sk,
-                top_category_revenue, average_items_per_order,
-                total_discount_amount, total_tax_amount, total_shipping_cost
-            )
-            WITH daily_stats AS (
-                SELECT
-                    COUNT(DISTINCT o.order_sk) as total_orders,
-                    COALESCE(SUM(o.total_amount), 0) as total_revenue,
-                    COALESCE(SUM(oi.quantity), 0) as total_items_sold,
-                    COALESCE(AVG(o.total_amount), 0) as average_order_value,
-                    COUNT(DISTINCT o.customer_sk) as unique_customers,
-                    COUNT(DISTINCT CASE WHEN c.registration_date = %s THEN c.customer_sk END) as new_customers,
-                    COUNT(DISTINCT CASE WHEN c.registration_date < %s THEN o.customer_sk END) as returning_customers,
-                    COALESCE(AVG(item_counts.items_per_order), 0) as average_items_per_order,
-                    COALESCE(SUM(o.discount_amount), 0) as total_discount_amount,
-                    COALESCE(SUM(o.tax_amount), 0) as total_tax_amount,
-                    COALESCE(SUM(o.shipping_cost), 0) as total_shipping_cost
-                FROM silver.orders o
-                LEFT JOIN silver.customers c ON o.customer_sk = c.customer_sk AND c.is_current = TRUE
-                LEFT JOIN (
-                    SELECT order_sk, SUM(quantity) as items_per_order
-                    FROM silver.order_items
-                    GROUP BY order_sk
-                ) item_counts ON o.order_sk = item_counts.order_sk
-                LEFT JOIN silver.order_items oi ON o.order_sk = oi.order_sk
-                WHERE o.order_date = %s
-            ),
-            top_category_info AS (
-                SELECT category
-                FROM silver.products p
-                JOIN silver.order_items oi2 ON p.product_sk = oi2.product_sk
-                JOIN silver.orders o2 ON oi2.order_sk = o2.order_sk
-                WHERE o2.order_date = %s
-                GROUP BY p.category
-                ORDER BY SUM(oi2.total_amount) DESC
-                LIMIT 1
-            ),
-            top_product_info AS (
-                SELECT p.product_sk
-                FROM silver.products p
-                JOIN silver.order_items oi3 ON p.product_sk = oi3.product_sk
-                JOIN silver.orders o3 ON oi3.order_sk = o3.order_sk
-                WHERE o3.order_date = %s
-                GROUP BY p.product_sk
-                ORDER BY SUM(oi3.total_amount) DESC
-                LIMIT 1
-            ),
-            top_category_revenue_info AS (
-                SELECT COALESCE(SUM(oi4.total_amount), 0) as revenue
-                FROM silver.order_items oi4
-                JOIN silver.orders o4 ON oi4.order_sk = o4.order_sk
-                JOIN silver.products p4 ON oi4.product_sk = p4.product_sk
-                WHERE o4.order_date = %s
-                AND EXISTS (SELECT 1 FROM top_category_info tci WHERE tci.category = p4.category)
+            INSERT INTO gold.agg_daily_sales (
+                date_key, total_orders, total_customers, total_items_sold,
+                gross_revenue, discount_given, net_revenue, avg_order_value
             )
             SELECT
                 %s as date_key,
-                ds.total_orders,
-                ds.total_revenue,
-                ds.total_items_sold,
-                ds.average_order_value,
-                ds.unique_customers,
-                ds.new_customers,
-                ds.returning_customers,
-                tci.category as top_category,
-                tpi.product_sk as top_product_sk,
-                tcr.revenue as top_category_revenue,
-                ds.average_items_per_order,
-                ds.total_discount_amount,
-                ds.total_tax_amount,
-                ds.total_shipping_cost
-            FROM daily_stats ds
-            CROSS JOIN LATERAL (SELECT category FROM top_category_info LIMIT 1) tci
-            CROSS JOIN LATERAL (SELECT product_sk FROM top_product_info LIMIT 1) tpi
-            CROSS JOIN LATERAL (SELECT revenue FROM top_category_revenue_info LIMIT 1) tcr
+                COUNT(DISTINCT o.order_id) as total_orders,
+                COUNT(DISTINCT o.customer_key) as total_customers,
+                COALESCE(SUM(oi.quantity), 0) as total_items_sold,
+                COALESCE(SUM(oi.line_total), 0) as gross_revenue,
+                COALESCE(SUM(oi.discount_amount), 0) as discount_given,
+                COALESCE(SUM(oi.net_amount), 0) as net_revenue,
+                CASE WHEN COUNT(DISTINCT o.order_id) > 0
+                    THEN COALESCE(SUM(oi.net_amount), 0) / COUNT(DISTINCT o.order_id)
+                    ELSE 0
+                END as avg_order_value
+            FROM silver.orders o
+            LEFT JOIN silver.order_item oi ON o.order_key = oi.order_key
+            WHERE o.order_date = %s
         """
         
         try:
-            self.cursor.execute(aggregate_query, (
-                target_date, target_date, target_date, target_date,
-                target_date, target_date, target_date
-            ))
+            self.cursor.execute(aggregate_query, (date_key, target_date))
             self.connection.commit()
-            logger.info(f"Successfully aggregated daily sales summary for {target_date}")
+            logger.info(f"Successfully aggregated daily sales for {target_date}")
             return 1
         except Exception as e:
-            logger.error(f"Error aggregating daily sales summary: {e}")
+            logger.error(f"Error aggregating daily sales: {e}", exc_info=True)
             self.connection.rollback()
             return 0
     
-    def aggregate_customer_360(self, customer_sk: int = None):
-        """Aggregate customer 360 view for a specific customer or all customers."""
-        logger.info("Aggregating customer 360 data...")
+    def aggregate_customer_lifetime(self):
+        """Aggregate customer lifetime value into gold.agg_customer_lifetime."""
+        if not self.table_is_empty('gold', 'agg_customer_lifetime'):
+            logger.info("⏭️  gold.agg_customer_lifetime already has data; skipping.")
+            return 0
         
-        if customer_sk:
-            where_clause = "WHERE c.customer_sk = %s"
-            params = (customer_sk,)
-        else:
-            where_clause = ""
-            params = None
+        logger.info("Aggregating customer lifetime data...")
         
         # Delete existing records
-        if customer_sk:
-            self.cursor.execute(
-                "DELETE FROM gold.customer_360 WHERE customer_sk = %s",
-                (customer_sk,)
-            )
-        else:
-            self.cursor.execute("DELETE FROM gold.customer_360")
+        self.cursor.execute("DELETE FROM gold.agg_customer_lifetime")
         
-        aggregate_query = f"""
-            INSERT INTO gold.customer_360 (
-                customer_sk, customer_id, lifetime_value, total_orders,
-                average_order_value, purchase_frequency, days_since_last_purchase,
-                days_since_first_purchase, customer_segment, favorite_category,
-                favorite_brand, registration_date, first_purchase_date, last_purchase_date
+        aggregate_query = """
+            INSERT INTO gold.agg_customer_lifetime (
+                customer_key, first_order_date, last_order_date, customer_tenure_days,
+                total_orders, total_items_purchased, lifetime_gross_value,
+                lifetime_net_value, avg_order_value, avg_order_frequency_days,
+                rfm_recency_score, rfm_frequency_score, rfm_monetary_score,
+                rfm_segment, customer_tier
+            )
+            WITH customer_stats AS (
+                SELECT
+                    c.customer_key,
+                    MIN(o.order_date) as first_order_date,
+                    MAX(o.order_date) as last_order_date,
+                    COUNT(DISTINCT o.order_id) as total_orders,
+                    COALESCE(SUM(oi.quantity), 0) as total_items_purchased,
+                    COALESCE(SUM(oi.line_total), 0) as lifetime_gross_value,
+                    COALESCE(SUM(oi.net_amount), 0) as lifetime_net_value,
+                    CASE WHEN COUNT(DISTINCT o.order_id) > 0
+                        THEN COALESCE(SUM(oi.net_amount), 0) / COUNT(DISTINCT o.order_id)
+                        ELSE 0
+                    END as avg_order_value
+                FROM silver.customer c
+                LEFT JOIN silver.orders o ON c.customer_key = o.customer_key
+                LEFT JOIN silver.order_item oi ON o.order_key = oi.order_key
+                WHERE c.is_valid = TRUE
+                GROUP BY c.customer_key
+            ),
+            rfm_scores AS (
+                SELECT
+                    cs.*,
+                    CASE
+                        WHEN (CURRENT_DATE - cs.last_order_date) <= 30 THEN 5
+                        WHEN (CURRENT_DATE - cs.last_order_date) <= 60 THEN 4
+                        WHEN (CURRENT_DATE - cs.last_order_date) <= 90 THEN 3
+                        WHEN (CURRENT_DATE - cs.last_order_date) <= 180 THEN 2
+                        ELSE 1
+                    END as recency_score,
+                    CASE
+                        WHEN cs.total_orders >= 20 THEN 5
+                        WHEN cs.total_orders >= 10 THEN 4
+                        WHEN cs.total_orders >= 5 THEN 3
+                        WHEN cs.total_orders >= 2 THEN 2
+                        ELSE 1
+                    END as frequency_score,
+                    CASE
+                        WHEN cs.lifetime_net_value >= 10000 THEN 5
+                        WHEN cs.lifetime_net_value >= 5000 THEN 4
+                        WHEN cs.lifetime_net_value >= 2000 THEN 3
+                        WHEN cs.lifetime_net_value >= 500 THEN 2
+                        ELSE 1
+                    END as monetary_score
+                FROM customer_stats cs
             )
             SELECT
-                c.customer_sk,
-                c.customer_id,
-                COALESCE(SUM(o.total_amount), 0) as lifetime_value,
-                COUNT(DISTINCT o.order_sk) as total_orders,
-                COALESCE(AVG(o.total_amount), 0) as average_order_value,
-                CASE
-                    WHEN (MAX(o.order_date) - MIN(o.order_date)) > 0
-                    THEN COUNT(DISTINCT o.order_sk)::DECIMAL / 
-                         GREATEST(EXTRACT(EPOCH FROM (MAX(o.order_date)::timestamp - MIN(o.order_date)::timestamp)) / 2592000, 1)
+                rfm.customer_key,
+                rfm.first_order_date,
+                rfm.last_order_date,
+                CASE WHEN rfm.first_order_date IS NOT NULL
+                    THEN (CURRENT_DATE - rfm.first_order_date)
                     ELSE 0
-                END as purchase_frequency,
-                CASE WHEN MAX(o.order_date) IS NOT NULL
-                    THEN (CURRENT_DATE - MAX(o.order_date))
+                END as customer_tenure_days,
+                rfm.total_orders,
+                rfm.total_items_purchased,
+                rfm.lifetime_gross_value,
+                rfm.lifetime_net_value,
+                rfm.avg_order_value,
+                CASE WHEN rfm.total_orders > 1 AND rfm.first_order_date IS NOT NULL AND rfm.last_order_date IS NOT NULL
+                    THEN (rfm.last_order_date - rfm.first_order_date) / NULLIF(rfm.total_orders - 1, 0)
                     ELSE NULL
-                END as days_since_last_purchase,
-                CASE WHEN MIN(o.order_date) IS NOT NULL
-                    THEN (CURRENT_DATE - MIN(o.order_date))
-                    ELSE NULL
-                END as days_since_first_purchase,
-                c.customer_segment,
-                (SELECT p.category FROM silver.products p
-                 JOIN silver.order_items oi ON p.product_sk = oi.product_sk
-                 JOIN silver.orders o2 ON oi.order_sk = o2.order_sk
-                 WHERE o2.customer_sk = c.customer_sk
-                 GROUP BY p.category
-                 ORDER BY SUM(oi.quantity) DESC
-                 LIMIT 1) as favorite_category,
-                (SELECT p.brand FROM silver.products p
-                 JOIN silver.order_items oi ON p.product_sk = oi.product_sk
-                 JOIN silver.orders o2 ON oi.order_sk = o2.order_sk
-                 WHERE o2.customer_sk = c.customer_sk
-                 GROUP BY p.brand
-                 ORDER BY SUM(oi.quantity) DESC
-                 LIMIT 1) as favorite_brand,
-                c.registration_date,
-                MIN(o.order_date) as first_purchase_date,
-                MAX(o.order_date) as last_purchase_date
-            FROM silver.customers c
-            LEFT JOIN silver.orders o ON c.customer_sk = o.customer_sk
-            WHERE c.is_current = TRUE {where_clause}
-            GROUP BY c.customer_sk, c.customer_id, c.customer_segment, c.registration_date
+                END as avg_order_frequency_days,
+                rfm.recency_score,
+                rfm.frequency_score,
+                rfm.monetary_score,
+                CASE
+                    WHEN rfm.recency_score >= 4 AND rfm.frequency_score >= 4 AND rfm.monetary_score >= 4 THEN 'Champions'
+                    WHEN rfm.recency_score >= 3 AND rfm.frequency_score >= 3 AND rfm.monetary_score >= 3 THEN 'Loyal Customers'
+                    WHEN rfm.recency_score >= 2 AND rfm.frequency_score >= 2 THEN 'Potential Loyalists'
+                    WHEN rfm.recency_score >= 3 AND rfm.frequency_score <= 2 THEN 'New Customers'
+                    WHEN rfm.recency_score <= 2 AND rfm.frequency_score >= 3 THEN 'At Risk'
+                    WHEN rfm.recency_score <= 2 AND rfm.frequency_score <= 2 AND rfm.monetary_score >= 3 THEN 'Cannot Lose Them'
+                    WHEN rfm.recency_score <= 2 AND rfm.frequency_score <= 2 AND rfm.monetary_score <= 2 THEN 'Lost'
+                    ELSE 'Need Attention'
+                END as rfm_segment,
+                CASE
+                    WHEN rfm.lifetime_net_value >= 10000 THEN 'PLATINUM'
+                    WHEN rfm.lifetime_net_value >= 5000 THEN 'GOLD'
+                    WHEN rfm.lifetime_net_value >= 2000 THEN 'SILVER'
+                    ELSE 'BRONZE'
+                END as customer_tier
+            FROM rfm_scores rfm
         """
         
         try:
-            if params:
-                self.cursor.execute(aggregate_query, params)
-            else:
-                self.cursor.execute(aggregate_query)
-            
+            self.cursor.execute(aggregate_query)
             count = self.cursor.rowcount
             self.connection.commit()
-            logger.info(f"Successfully aggregated {count} customer 360 records")
+            logger.info(f"Successfully aggregated {count:,} customer lifetime records")
             return count
         except Exception as e:
-            logger.error(f"Error aggregating customer 360: {e}")
+            logger.error(f"Error aggregating customer lifetime: {e}", exc_info=True)
             self.connection.rollback()
             return 0
     
-    def aggregate_product_performance(self, product_sk: int = None):
-        """Aggregate product performance metrics."""
-        logger.info("Aggregating product performance data...")
+    def aggregate_monthly_product_sales(self):
+        """Aggregate monthly product sales into gold.agg_monthly_product_sales."""
+        if not self.table_is_empty('gold', 'agg_monthly_product_sales'):
+            logger.info("⏭️  gold.agg_monthly_product_sales already has data; skipping.")
+            return 0
         
-        if product_sk:
-            where_clause = "WHERE p.product_sk = %s"
-            params = (product_sk,)
-        else:
-            where_clause = ""
-            params = None
+        logger.info("Aggregating monthly product sales...")
         
         # Delete existing records
-        if product_sk:
-            self.cursor.execute(
-                "DELETE FROM gold.product_performance WHERE product_sk = %s",
-                (product_sk,)
-            )
-        else:
-            self.cursor.execute("DELETE FROM gold.product_performance")
+        self.cursor.execute("DELETE FROM gold.agg_monthly_product_sales")
         
-        aggregate_query = f"""
-            INSERT INTO gold.product_performance (
-                product_sk, product_id, product_name, category,
-                total_units_sold, total_revenue, average_rating,
-                review_count, days_since_last_sale
+        aggregate_query = """
+            INSERT INTO gold.agg_monthly_product_sales (
+                year_number, month_number, category_name,
+                total_quantity_sold, total_orders, gross_revenue,
+                net_revenue, avg_unit_price, category_rank
+            )
+            WITH monthly_stats AS (
+                SELECT
+                    EXTRACT(YEAR FROM o.order_date)::INT as year_number,
+                    EXTRACT(MONTH FROM o.order_date)::INT as month_number,
+                    COALESCE(p.category_name, 'Unknown') as category_name,
+                    SUM(oi.quantity) as total_quantity_sold,
+                    COUNT(DISTINCT o.order_id) as total_orders,
+                    SUM(oi.line_total) as gross_revenue,
+                    SUM(oi.net_amount) as net_revenue,
+                    CASE WHEN SUM(oi.quantity) > 0
+                        THEN SUM(oi.line_total) / SUM(oi.quantity)
+                        ELSE 0
+                    END as avg_unit_price
+                FROM silver.orders o
+                JOIN silver.order_item oi ON o.order_key = oi.order_key
+                JOIN silver.product p ON oi.product_key = p.product_key
+                WHERE p.is_valid = TRUE
+                GROUP BY EXTRACT(YEAR FROM o.order_date), EXTRACT(MONTH FROM o.order_date), p.category_name
             )
             SELECT
-                p.product_sk,
-                p.product_id,
-                p.product_name,
-                p.category,
-                COALESCE(SUM(oi.quantity), 0) as total_units_sold,
-                COALESCE(SUM(oi.total_amount), 0) as total_revenue,
-                CASE WHEN COUNT(DISTINCT pr.review_sk) > 0 
-                    THEN AVG(pr.rating)
-                    ELSE NULL
-                END as average_rating,
-                COUNT(DISTINCT pr.review_sk) as review_count,
-                CASE WHEN MAX(o.order_date) IS NOT NULL
-                    THEN (CURRENT_DATE - MAX(o.order_date))
-                    ELSE NULL
-                END as days_since_last_sale
-            FROM silver.products p
-            LEFT JOIN silver.order_items oi ON p.product_sk = oi.product_sk
-            LEFT JOIN silver.orders o ON oi.order_sk = o.order_sk
-            LEFT JOIN silver.product_reviews pr ON p.product_sk = pr.product_sk
-            WHERE p.is_current = TRUE {where_clause}
-            GROUP BY p.product_sk, p.product_id, p.product_name, p.category
+                ms.year_number,
+                ms.month_number,
+                ms.category_name,
+                ms.total_quantity_sold,
+                ms.total_orders,
+                ms.gross_revenue,
+                ms.net_revenue,
+                ms.avg_unit_price,
+                ROW_NUMBER() OVER (
+                    PARTITION BY ms.year_number, ms.month_number
+                    ORDER BY ms.net_revenue DESC
+                ) as category_rank
+            FROM monthly_stats ms
         """
         
         try:
-            if params:
-                self.cursor.execute(aggregate_query, params)
-            else:
-                self.cursor.execute(aggregate_query)
-            
+            self.cursor.execute(aggregate_query)
             count = self.cursor.rowcount
             self.connection.commit()
-            logger.info(f"Successfully aggregated {count} product performance records")
+            logger.info(f"Successfully aggregated {count:,} monthly product sales records")
             return count
         except Exception as e:
-            logger.error(f"Error aggregating product performance: {e}")
+            logger.error(f"Error aggregating monthly product sales: {e}", exc_info=True)
             self.connection.rollback()
             return 0
     
     def aggregate_all(self):
-        """Aggregate all Gold layer tables."""
-        logger.info("=" * 60)
-        logger.info("Starting Silver to Gold Aggregation")
-        logger.info("=" * 60)
+        """Aggregate all Gold layer tables (only empty ones)."""
+        logger.info("=" * 80)
+        logger.info("SILVER TO GOLD AGGREGATION - STARTING")
+        logger.info("=" * 80)
+        logger.info(f"Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("")
+        
+        totals = {}
+        aggregation_start = time.time()
         
         # Aggregate daily sales for last 30 days
-        logger.info("\nAggregating daily sales summaries...")
+        logger.info("-" * 80)
+        logger.info("STEP 1/3: Aggregating Daily Sales Summaries")
+        logger.info("-" * 80)
+        logger.info("Processing last 30 days of sales data...")
+        logger.info("")
+        
+        daily_start = time.time()
+        daily_count = 0
         for i in range(30):
             target_date = date.today() - timedelta(days=i+1)
-            self.aggregate_daily_sales_summary(target_date)
+            result = self.aggregate_daily_sales(target_date)
+            if result > 0:
+                daily_count += 1
+                if daily_count % 5 == 0:
+                    logger.info(f"  Processed {daily_count}/30 days...")
         
-        # Aggregate customer 360
-        logger.info("\nAggregating customer 360...")
-        self.aggregate_customer_360()
+        daily_elapsed = time.time() - daily_start
+        totals['daily_sales'] = daily_count
+        logger.info("")
+        logger.info(f"✓ Daily Sales Aggregation Complete")
+        logger.info(f"  Days aggregated: {daily_count}/30")
+        logger.info(f"  Time taken: {daily_elapsed:.2f}s")
+        logger.info("")
         
-        # Aggregate product performance
-        logger.info("\nAggregating product performance...")
-        self.aggregate_product_performance()
+        # Aggregate customer lifetime
+        logger.info("-" * 80)
+        logger.info("STEP 2/3: Aggregating Customer Lifetime Value")
+        logger.info("-" * 80)
+        logger.info("Calculating RFM scores and customer segments...")
+        logger.info("")
         
-        logger.info("=" * 60)
-        logger.info("Silver to Gold Aggregation Complete!")
-        logger.info("=" * 60)
-
+        customer_start = time.time()
+        customer_count = self.aggregate_customer_lifetime()
+        customer_elapsed = time.time() - customer_start
+        totals['customer_lifetime'] = customer_count
+        logger.info("")
+        logger.info(f"✓ Customer Lifetime Aggregation Complete")
+        logger.info(f"  Customers aggregated: {customer_count:,}")
+        logger.info(f"  Time taken: {customer_elapsed:.2f}s ({customer_elapsed/60:.2f} min)")
+        logger.info("")
+        
+        # Aggregate monthly product sales
+        logger.info("-" * 80)
+        logger.info("STEP 3/3: Aggregating Monthly Product Sales")
+        logger.info("-" * 80)
+        logger.info("Calculating monthly sales by product category...")
+        logger.info("")
+        
+        product_start = time.time()
+        product_count = self.aggregate_monthly_product_sales()
+        product_elapsed = time.time() - product_start
+        totals['monthly_product_sales'] = product_count
+        logger.info("")
+        logger.info(f"✓ Monthly Product Sales Aggregation Complete")
+        logger.info(f"  Monthly records aggregated: {product_count:,}")
+        logger.info(f"  Time taken: {product_elapsed:.2f}s ({product_elapsed/60:.2f} min)")
+        logger.info("")
+        
+        total_elapsed = time.time() - aggregation_start
+        
+        logger.info("=" * 80)
+        logger.info("SILVER TO GOLD AGGREGATION COMPLETE!")
+        logger.info("=" * 80)
+        logger.info("Final Summary:")
+        for key, value in sorted(totals.items()):
+            logger.info(f"  {key.replace('_', ' ').title():30s}: {value:>15,} records")
+        logger.info(f"Total Time: {total_elapsed:.2f}s ({total_elapsed/60:.2f} min)")
+        logger.info("=" * 80)
+        
+        return totals

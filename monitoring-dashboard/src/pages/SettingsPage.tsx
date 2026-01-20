@@ -1,34 +1,24 @@
-import React from 'react';
-import { Box, Typography, Card, CardContent } from '@mui/material';
+/**
+ * Settings Page
+ */
 
-const SettingsPage: React.FC = () => {
+import React from 'react';
+import { Box, Typography, Paper } from '@mui/material';
+
+export const SettingsPage: React.FC = () => {
   return (
-    <Box sx={{ width: '100%' }}>
-      <Typography
-        variant="h4"
-        gutterBottom
-        sx={{
-          fontWeight: 800,
-          mb: 4,
-          color: '#ffffff',
-          letterSpacing: '-0.02em',
-        }}
-      >
+    <Box sx={{ p: 3 }}>
+      <Typography variant="h4" gutterBottom>
         Settings
       </Typography>
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ color: '#ffffff' }}>
-            System Settings
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Configuration and settings will be displayed here.
-          </Typography>
-        </CardContent>
-      </Card>
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="body1">
+          Settings and configuration will be displayed here.
+        </Typography>
+      </Paper>
     </Box>
   );
 };
 
-export default SettingsPage;
+
 
