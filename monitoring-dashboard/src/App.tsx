@@ -17,7 +17,7 @@ import { MonitoringDashboard } from './pages/MonitoringDashboard';
 import { StorageDashboard } from './pages/StorageDashboard';
 import { OptimizationsPage } from './pages/OptimizationsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
-import { AlertsPage } from './pages/AlertsPage';
+import { AlertsIncidentsPage } from './pages/AlertsIncidentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { DataExplorerPage } from './pages/DataExplorerPage';
 import { Box } from '@mui/material';
@@ -177,7 +177,7 @@ function App() {
                     <Route path="/data" element={<DataExplorerPage />} />
                     <Route path="/optimizations" element={<OptimizationsPage />} />
                     <Route path="/analytics" element={<AnalyticsPage />} />
-                    <Route path="/alerts" element={<AlertsPage />} />
+                    <Route path="/alerts" element={<AlertsIncidentsPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                   </Routes>
                 </Box>

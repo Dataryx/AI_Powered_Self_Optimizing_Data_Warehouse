@@ -55,7 +55,8 @@ route_files = [
     'warehouse_routes',
     'monitoring_routes',  # New routes
     'storage_routes',
-    'alert_routes'
+    'alert_routes',
+    'websocket_routes'  # WebSocket routes for real-time updates
 ]
 for route_file in route_files:
     route_path = routes_dir / f"{route_file}.py"

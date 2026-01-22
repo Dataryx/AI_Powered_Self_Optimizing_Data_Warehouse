@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 class BronzeToSilverTransformer:
     """Transforms Bronze layer data to Silver layer."""
     
-    def __init__(self, connection):
+    def __init__(self, connection, tracker=None):
         """Initialize transformer with database connection."""
         self.connection = connection
         self.cursor = connection.cursor()
+        self.tracker = tracker
     
     def table_is_empty(self, schema: str, table: str) -> bool:
         """Check if a table is empty."""
@@ -1188,9 +1189,24 @@ class BronzeToSilverTransformer:
             logger.info(f"Records to transform: {bronze_count - silver_before:,}")
             logger.info("")
             
+            # Start job tracking
+            job_id = None
+            if self.tracker:
+                job_name = f"SILVER - {name.replace('_', ' ').title()} Transformation"
+                job_id = self.tracker.start_job(
+                    job_name,
+                    "transformation",
+                    "silver",
+                    table_name,
+                    bronze_count - silver_before
+                )
+                self.tracker.update_progress(job_id, 0)
+            
             # Transform in batches
             batch_num = 0
             step_total = 0
+            records_to_process = bronze_count - silver_before
+            
             while True:
                 batch_start = time.time()
                 count = transform_func(batch_size)
@@ -1201,6 +1217,12 @@ class BronzeToSilverTransformer:
                 
                 batch_num += 1
                 step_total += count
+                
+                # Update progress
+                if self.tracker and job_id and records_to_process > 0:
+                    progress = min(95, int((step_total / records_to_process) * 100))
+                    self.tracker.update_progress(job_id, progress, step_total)
+                
                 logger.info(f"  Batch {batch_num}: Transformed {count:,} records in {batch_elapsed:.2f}s "
                           f"({count/batch_elapsed:.0f} records/sec)")
             
@@ -1213,6 +1235,11 @@ class BronzeToSilverTransformer:
             
             step_elapsed = time.time() - step_start
             totals[name] = step_total
+            
+            # Complete job tracking
+            if self.tracker and job_id:
+                self.tracker.update_progress(job_id, 100, step_total)
+                self.tracker.complete_job(job_id, step_total)
             
             logger.info("")
             logger.info(f"✓ {name.replace('_', ' ').title()} Transformation Complete")

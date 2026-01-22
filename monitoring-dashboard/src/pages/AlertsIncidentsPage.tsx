@@ -1,16 +1,16 @@
 /**
- * Monitoring System Settings Page
+ * Alerts & Incidents Dashboard Page
  * Enhanced with real-time updates and unique UI design
  */
 
 import React, { useState, useCallback } from 'react';
 import { Box, Typography, IconButton, Chip, CircularProgress } from '@mui/material';
 import { Refresh, FiberManualRecord } from '@mui/icons-material';
-import { AlertSettings } from '../components/settings/AlertSettings';
-import { MonitoringSettings } from '../components/settings/MonitoringSettings';
-import { SystemSettings } from '../components/settings/SystemSettings';
+import { ActiveAlerts } from '../components/alerts/ActiveAlerts';
+import { AnomalyDetection } from '../components/alerts/AnomalyDetection';
+import { IncidentTracker } from '../components/alerts/IncidentTracker';
 
-export const SettingsPage: React.FC = () => {
+export const AlertsIncidentsPage: React.FC = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
@@ -58,7 +58,7 @@ export const SettingsPage: React.FC = () => {
             sx={{
               fontWeight: 800,
               mb: 0.5,
-              background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #10b981 100%)',
+              background: 'linear-gradient(135deg, #ef4444 0%, #f59e0b 50%, #3b82f6 100%)',
               backgroundClip: 'text',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
@@ -66,7 +66,7 @@ export const SettingsPage: React.FC = () => {
               fontSize: { xs: '1.75rem', md: '2rem' },
             }}
           >
-            Monitoring System Settings
+            Alerts & Incidents Dashboard
           </Typography>
           <Typography 
             variant="body2" 
@@ -76,7 +76,7 @@ export const SettingsPage: React.FC = () => {
               fontSize: '0.875rem' 
             }}
           >
-            Configure alerts, monitoring intervals, and system preferences
+            Real-time alerts, anomaly detection, and incident tracking
           </Typography>
         </Box>
 
@@ -112,17 +112,17 @@ export const SettingsPage: React.FC = () => {
             onClick={handleRefresh}
             disabled={isRefreshing}
             sx={{
-              backgroundColor: 'rgba(99, 102, 241, 0.1)',
-              color: '#6366f1',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              color: '#ef4444',
               '&:hover': {
-                backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                backgroundColor: 'rgba(239, 68, 68, 0.2)',
                 transform: 'rotate(180deg)',
               },
               transition: 'all 0.3s',
             }}
           >
             {isRefreshing ? (
-              <CircularProgress size={20} sx={{ color: '#6366f1' }} />
+              <CircularProgress size={20} sx={{ color: '#ef4444' }} />
             ) : (
               <Refresh />
             )}
@@ -130,16 +130,19 @@ export const SettingsPage: React.FC = () => {
         </Box>
       </Box>
 
-      {/* Settings Components - Grid Layout */}
+      {/* Alerts and Anomalies - Side by Side */}
       <Box sx={{ mb: 3 }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2, mb: 2 }}>
-          <AlertSettings refreshKey={refreshKey} />
-          <MonitoringSettings refreshKey={refreshKey} />
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2 }}>
+          <ActiveAlerts refreshKey={refreshKey} />
+          <AnomalyDetection refreshKey={refreshKey} />
         </Box>
-        <Box>
-          <SystemSettings refreshKey={refreshKey} />
-        </Box>
+      </Box>
+
+      {/* Incidents - Full Width */}
+      <Box sx={{ mb: 3 }}>
+        <IncidentTracker refreshKey={refreshKey} />
       </Box>
     </Box>
   );
 };
+

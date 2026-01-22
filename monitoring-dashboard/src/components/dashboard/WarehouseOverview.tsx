@@ -18,10 +18,17 @@ interface WarehouseOverviewProps {
 export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary }) => {
   const [hoveredLayer, setHoveredLayer] = useState<string | null>(null);
 
+  // Ensure summary has all required properties with defaults
+  const safeSummary = {
+    bronze: summary?.bronze || { table_count: 0, estimated_rows: 0, total_size: '0 MB' },
+    silver: summary?.silver || { table_count: 0, estimated_rows: 0, total_size: '0 MB' },
+    gold: summary?.gold || { table_count: 0, estimated_rows: 0, total_size: '0 MB' },
+  };
+
   const layers = [
     {
       name: 'Bronze',
-      data: summary.bronze,
+      data: safeSummary.bronze,
       gradient: ['#f59e0b', '#fbbf24'],
       color: '#f59e0b',
       icon: <Storage />,
@@ -30,7 +37,7 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
     },
     {
       name: 'Silver',
-      data: summary.silver,
+      data: safeSummary.silver,
       gradient: ['#6366f1', '#8b5cf6'],
       color: '#6366f1',
       icon: <TableChart />,
@@ -39,7 +46,7 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
     },
     {
       name: 'Gold',
-      data: summary.gold,
+      data: safeSummary.gold,
       gradient: ['#10b981', '#34d399'],
       color: '#10b981',
       icon: <DataObject />,

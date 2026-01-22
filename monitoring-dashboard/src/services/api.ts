@@ -138,6 +138,35 @@ class ApiService {
       body: JSON.stringify(config),
     });
   }
+
+  // Optimization endpoints
+  async getOptimizationRecommendations(type?: string, status?: string) {
+    const params = new URLSearchParams();
+    if (type) params.append('type', type);
+    if (status) params.append('status', status);
+    const query = params.toString();
+    return this.request(`/optimization/recommendations${query ? `?${query}` : ''}`);
+  }
+
+  async applyOptimization(recommendationId: string, auto: boolean = false) {
+    return this.request(`/optimization/recommendations/${recommendationId}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ optimization_id: recommendationId, auto }),
+    });
+  }
+
+  async getQueryPerformance(startDate?: string, endDate?: string, queryId?: string, limit: number = 100) {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    if (queryId) params.append('query_id', queryId);
+    params.append('limit', limit.toString());
+    return this.request(`/optimization/query-performance?${params.toString()}`);
+  }
+
+  async getOptimizationHistory(limit: number = 100) {
+    return this.request(`/optimization/history?limit=${limit}`);
+  }
 }
 
 export const apiService = new ApiService();

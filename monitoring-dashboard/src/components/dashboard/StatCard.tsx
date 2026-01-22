@@ -108,7 +108,7 @@ export const StatCard: React.FC<StatCardProps> = ({
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             letterSpacing: '-0.02em',
-            fontSize: '1.75rem',
+            fontSize: '1.3rem',
             transition: 'transform 0.3s',
             transform: isHovered ? 'scale(1.05)' : 'scale(1)',
           }}

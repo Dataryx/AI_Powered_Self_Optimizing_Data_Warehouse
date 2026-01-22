@@ -26,11 +26,24 @@ interface SalesChartProps {
 export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   
-  const chartData = data.map((item) => ({
-    date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    sales: item.count,
-    revenue: item.revenue,
-  }));
+  // Handle empty or missing data
+  const safeData = data || [];
+  const chartData = safeData.length > 0 
+    ? safeData.map((item) => ({
+        date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        sales: item.count || 0,
+        revenue: item.revenue || 0,
+      }))
+    : // Generate placeholder data for last 30 days if no data
+      Array.from({ length: 30 }, (_, i) => {
+        const date = new Date();
+        date.setDate(date.getDate() - (29 - i));
+        return {
+          date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          sales: 0,
+          revenue: 0,
+        };
+      });
 
   return (
     <Card

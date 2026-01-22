@@ -16,68 +16,61 @@ logger = logging.getLogger(__name__)
 
 @router.get("/etl/jobs")
 async def get_etl_jobs():
-    """Get ETL job status and progress."""
+    """Get ETL job status and progress from tracking table."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
-            # Get ETL job information from system tables or create mock data based on actual tables
-            # For now, we'll query table statistics to infer ETL activity
-            jobs = []
+            # Check if monitoring.etl_jobs table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_schema = 'monitoring' AND table_name = 'etl_jobs'
+                )
+            """)
+            table_exists = cursor.fetchone().get('exists', False)
             
-            # Check last update times for each layer
-            for schema in ['bronze', 'silver', 'gold']:
-                try:
-                    cursor.execute("""
-                        SELECT 
-                            tablename,
-                            COALESCE(n_tup_ins, 0) as inserts,
-                            COALESCE(n_tup_upd, 0) as updates,
-                            COALESCE(n_tup_del, 0) as deletes,
-                            last_vacuum,
-                            last_autovacuum,
-                            last_analyze,
-                            last_autoanalyze
-                        FROM pg_stat_user_tables
-                        WHERE schemaname = %s
-                        ORDER BY COALESCE(last_autoanalyze, last_autovacuum, last_vacuum, '1970-01-01'::timestamp) DESC NULLS LAST
-                        LIMIT 5
-                    """, (schema,))
-                    
-                    tables = cursor.fetchall()
-                    for table in tables:
-                        # Get last activity from any of the timestamp columns
-                        last_activity = table.get('last_autoanalyze') or table.get('last_autovacuum') or table.get('last_vacuum')
-                        if isinstance(last_activity, datetime):
-                            pass
-                        elif last_activity is None:
-                            last_activity = datetime.now() - timedelta(hours=1)
-                        else:
-                            last_activity = datetime.now() - timedelta(hours=1)
-                        
-                        # Calculate progress based on recent activity
-                        inserts = table.get('inserts', 0) or 0
-                        updates = table.get('updates', 0) or 0
-                        deletes = table.get('deletes', 0) or 0
-                        total_changes = inserts + updates + deletes
-                        
-                        tablename = table.get('tablename', 'unknown')
-                        
-                        jobs.append({
-                            "job_id": f"{schema}_{tablename}",
-                            "job_name": f"{schema.upper()} - {tablename}",
-                            "status": "completed" if last_activity else "running",
-                            "progress": 100 if last_activity and isinstance(last_activity, datetime) else 75,
-                            "started_at": (last_activity - timedelta(minutes=30)).isoformat() if last_activity and isinstance(last_activity, datetime) else datetime.now().isoformat(),
-                            "completed_at": last_activity.isoformat() if last_activity and isinstance(last_activity, datetime) else None,
-                            "records_processed": total_changes,
-                            "layer": schema,
-                            "table": tablename,
-                        })
-                except Exception as schema_error:
-                    # Skip this schema if there's an error (e.g., schema doesn't exist)
-                    logger.error(f"Error processing schema {schema}: {schema_error}")
-                    continue
+            if not table_exists:
+                # Table doesn't exist, return empty or create it
+                logger.warning("monitoring.etl_jobs table does not exist. Run scripts/create_etl_jobs_table.py to create it.")
+                return {"jobs": [], "total": 0}
+            
+            # Get recent jobs (last 24 hours, limit 50)
+            cursor.execute("""
+                SELECT 
+                    job_id,
+                    job_name,
+                    job_type,
+                    status,
+                    progress,
+                    layer,
+                    table_name as table,
+                    started_at,
+                    completed_at,
+                    records_processed,
+                    records_total,
+                    error_message,
+                    metadata
+                FROM monitoring.etl_jobs
+                WHERE started_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+                ORDER BY started_at DESC
+                LIMIT 50
+            """)
+            
+            jobs = []
+            for row in cursor.fetchall():
+                job = {
+                    "job_id": row.get('job_id'),
+                    "job_name": row.get('job_name'),
+                    "status": row.get('status', 'pending'),
+                    "progress": int(row.get('progress', 0)),
+                    "started_at": row.get('started_at').isoformat() if row.get('started_at') else None,
+                    "completed_at": row.get('completed_at').isoformat() if row.get('completed_at') else None,
+                    "records_processed": int(row.get('records_processed', 0) or 0),
+                    "layer": row.get('layer'),
+                    "table": row.get('table'),
+                }
+                jobs.append(job)
             
             return {"jobs": jobs, "total": len(jobs)}
     except Exception as e:
@@ -131,38 +124,161 @@ async def get_pipeline_dag():
 
 @router.get("/etl/freshness")
 async def get_data_freshness():
-    """Get data freshness indicators per layer."""
+    """Get data freshness indicators per layer using real table data and ETL job completion times."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             freshness = {}
             
+            # First, get ETL job completion times for each table (primary source of truth)
+            etl_completion_times = {}
+            etl_records_processed = {}
+            try:
+                cursor.execute("""
+                    SELECT 
+                        layer,
+                        table_name,
+                        MAX(completed_at) as last_completed,
+                        SUM(records_processed) as total_records
+                    FROM monitoring.etl_jobs
+                    WHERE status = 'completed' AND completed_at IS NOT NULL
+                    GROUP BY layer, table_name
+                """)
+                for row in cursor.fetchall():
+                    layer = row.get('layer')
+                    table_name = row.get('table_name')
+                    last_completed = row.get('last_completed')
+                    total_records = row.get('total_records', 0)
+                    if layer and table_name and last_completed:
+                        key = f"{layer}.{table_name}"
+                        etl_completion_times[key] = last_completed
+                        etl_records_processed[key] = int(total_records or 0)
+                logger.info(f"Found {len(etl_completion_times)} tables with ETL job data")
+            except Exception as etl_error:
+                logger.warning(f"Could not fetch ETL completion times: {etl_error}", exc_info=True)
+            
             for schema in ['bronze', 'silver', 'gold']:
                 try:
-                    # Get most recent activity for each table
-                    cursor.execute("""
-                        SELECT 
-                            tablename,
-                            last_autoanalyze,
-                            last_autovacuum,
-                            COALESCE(n_tup_ins, 0) as total_inserts,
-                            COALESCE(n_tup_upd, 0) as total_updates
-                        FROM pg_stat_user_tables
-                        WHERE schemaname = %s
-                        ORDER BY COALESCE(last_autoanalyze, last_autovacuum, '1970-01-01'::timestamp) DESC
-                        LIMIT 10
-                    """, (schema,))
+                    # Start with tables from ETL jobs (most reliable)
+                    etl_tables = {}
+                    for key, last_completed in etl_completion_times.items():
+                        if key.startswith(f"{schema}."):
+                            table_name = key.replace(f"{schema}.", "")
+                            etl_tables[table_name] = {
+                                'last_updated': last_completed,
+                                'total_records': etl_records_processed.get(key, 0)
+                            }
                     
-                    tables = cursor.fetchall()
+                    # Check if schema exists and get actual tables
+                    cursor.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.schemata 
+                            WHERE schema_name = %s
+                        )
+                    """, (schema,))
+                    schema_exists = cursor.fetchone().get('exists', False)
+                    
+                    table_names_set = set(etl_tables.keys())  # Start with ETL job tables
+                    
+                    if schema_exists:
+                        # Get all tables in the schema
+                        cursor.execute("""
+                            SELECT table_name
+                            FROM information_schema.tables
+                            WHERE table_schema = %s
+                            AND table_type = 'BASE TABLE'
+                            ORDER BY table_name
+                        """, (schema,))
+                        
+                        db_tables = [row.get('table_name') for row in cursor.fetchall()]
+                        table_names_set.update(db_tables)
+                        logger.info(f"Found {len(db_tables)} tables in schema {schema}: {db_tables}")
+                    
+                    table_names = list(table_names_set)
                     table_freshness = []
                     
-                    for table in tables:
-                        last_activity = table.get('last_autoanalyze') or table.get('last_autovacuum')
-                        if not last_activity or not isinstance(last_activity, datetime):
-                            last_activity = datetime.now() - timedelta(hours=24)
+                    for table_name in table_names:
+                        if not table_name:
+                            continue
+                            
+                        last_updated = None
+                        total_records = 0
                         
-                        hours_ago = (datetime.now() - last_activity).total_seconds() / 3600 if isinstance(last_activity, datetime) else 24.0
+                        # Try to get last update time from ETL jobs first (most reliable)
+                        etl_key = f"{schema}.{table_name}"
+                        if etl_key in etl_completion_times:
+                            last_updated = etl_completion_times[etl_key]
+                            if etl_key in etl_records_processed:
+                                total_records = etl_records_processed[etl_key]
+                        
+                        # If no ETL job data, try to get max timestamp from common timestamp columns
+                        if not last_updated:
+                            timestamp_columns = [
+                                'ingestion_timestamp',
+                                'created_at',
+                                'updated_at',
+                                'order_date',
+                                'event_timestamp',
+                                'start_time',
+                                'date',
+                                'timestamp'
+                            ]
+                            
+                            for col in timestamp_columns:
+                                try:
+                                    # Check if column exists first
+                                    cursor.execute("""
+                                        SELECT EXISTS (
+                                            SELECT 1 FROM information_schema.columns
+                                            WHERE table_schema = %s AND table_name = %s AND column_name = %s
+                                        )
+                                    """, (schema, table_name, col))
+                                    col_exists = cursor.fetchone().get('exists', False)
+                                    
+                                    if col_exists:
+                                        cursor.execute(f"""
+                                            SELECT MAX({col}) as max_ts, COUNT(*) as row_count
+                                            FROM {schema}.{table_name}
+                                        """)
+                                        result = cursor.fetchone()
+                                        if result and result.get('max_ts'):
+                                            last_updated = result.get('max_ts')
+                                            total_records = int(result.get('row_count', 0) or 0)
+                                            logger.debug(f"Found timestamp column {col} for {schema}.{table_name}: {last_updated}")
+                                            break
+                                except Exception as col_error:
+                                    logger.debug(f"Error checking column {col} in {schema}.{table_name}: {col_error}")
+                                    continue
+                        
+                        # If still no timestamp found, try to get row count and use current time minus 24h as fallback
+                        if not last_updated:
+                            try:
+                                cursor.execute(f"SELECT COUNT(*) as row_count FROM {schema}.{table_name}")
+                                result = cursor.fetchone()
+                                if result:
+                                    total_records = int(result.get('row_count', 0) or 0)
+                                    if total_records > 0:
+                                        # If table has data but no timestamp, assume it was updated recently
+                                        last_updated = datetime.now() - timedelta(hours=1)
+                                    else:
+                                        # Empty table, use old timestamp
+                                        last_updated = datetime.now() - timedelta(days=7)
+                            except Exception:
+                                total_records = 0
+                                last_updated = datetime.now() - timedelta(days=7)
+                        
+                        # Calculate hours ago
+                        if isinstance(last_updated, datetime):
+                            hours_ago = (datetime.now() - last_updated).total_seconds() / 3600
+                        elif isinstance(last_updated, str):
+                            try:
+                                last_updated_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+                                hours_ago = (datetime.now() - last_updated_dt.replace(tzinfo=None)).total_seconds() / 3600
+                            except:
+                                hours_ago = 24.0
+                        else:
+                            hours_ago = 24.0
                         
                         # Determine freshness status
                         if hours_ago < 1:
@@ -175,14 +291,25 @@ async def get_data_freshness():
                             status = "outdated"
                             color = "error"
                         
+                        # Format last_updated for display
+                        if isinstance(last_updated, datetime):
+                            last_updated_iso = last_updated.isoformat()
+                        elif isinstance(last_updated, str):
+                            last_updated_iso = last_updated
+                        else:
+                            last_updated_iso = None
+                        
                         table_freshness.append({
-                            "table": table.get('tablename', 'unknown'),
-                            "last_updated": last_activity.isoformat() if isinstance(last_activity, datetime) else None,
+                            "table": table_name,
+                            "last_updated": last_updated_iso,
                             "hours_ago": round(hours_ago, 2),
                             "status": status,
                             "color": color,
-                            "total_records": table.get('total_inserts', 0) or 0,
+                            "total_records": total_records,
                         })
+                    
+                    # Sort by hours_ago (most recent first)
+                    table_freshness.sort(key=lambda x: x['hours_ago'])
                     
                     # Determine overall status
                     if not table_freshness:
@@ -195,11 +322,11 @@ async def get_data_freshness():
                         overall_status = "outdated"
                     
                     freshness[schema] = {
-                        "tables": table_freshness,
+                        "tables": table_freshness[:10],  # Limit to top 10 most recent
                         "overall_status": overall_status,
                     }
                 except Exception as schema_error:
-                    logger.error(f"Error processing freshness for schema {schema}: {schema_error}")
+                    logger.error(f"Error processing freshness for schema {schema}: {schema_error}", exc_info=True)
                     freshness[schema] = {
                         "tables": [],
                         "overall_status": "outdated",
@@ -213,46 +340,130 @@ async def get_data_freshness():
 
 @router.get("/etl/errors")
 async def get_etl_errors():
-    """Get error and retry tracking information."""
+    """Get error and retry tracking information from ETL jobs."""
     try:
-        # Check for common data quality issues
         with get_db_connection() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             errors = []
             
-            # Check for tables with no data (potential ETL failures)
+            # Get failed ETL jobs (primary source of errors)
+            try:
+                cursor.execute("""
+                    SELECT 
+                        job_id,
+                        job_name,
+                        job_type,
+                        layer,
+                        table_name,
+                        status,
+                        error_message,
+                        started_at,
+                        completed_at,
+                        progress,
+                        records_processed
+                    FROM monitoring.etl_jobs
+                    WHERE status = 'failed' 
+                    AND started_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+                    ORDER BY started_at DESC
+                    LIMIT 50
+                """)
+                
+                failed_jobs = cursor.fetchall()
+                for job in failed_jobs:
+                    error_id = job.get('job_id')
+                    error_message = job.get('error_message') or 'ETL job failed'
+                    table_name = job.get('table_name')
+                    layer = job.get('layer')
+                    
+                    # Determine severity based on layer and error type
+                    if layer == 'gold':
+                        severity = 'critical'
+                    elif layer == 'silver':
+                        severity = 'high'
+                    else:
+                        severity = 'warning'
+                    
+                    # Determine error type
+                    if 'timeout' in error_message.lower() or 'timeout' in error_message.lower():
+                        error_type = 'timeout'
+                    elif 'connection' in error_message.lower() or 'network' in error_message.lower():
+                        error_type = 'connection'
+                    elif 'constraint' in error_message.lower() or 'violation' in error_message.lower():
+                        error_type = 'constraint_violation'
+                    elif 'null' in error_message.lower() or 'missing' in error_message.lower():
+                        error_type = 'data_quality'
+                    else:
+                        error_type = 'processing_error'
+                    
+                    errors.append({
+                        "error_id": error_id,
+                        "type": error_type,
+                        "severity": severity,
+                        "table": f"{layer}.{table_name}" if layer and table_name else None,
+                        "message": error_message[:200],  # Truncate long messages
+                        "occurred_at": job.get('started_at').isoformat() if job.get('started_at') else datetime.now().isoformat(),
+                        "retry_count": 0,  # Could track retries if we add that field
+                        "status": "active",
+                        "job_name": job.get('job_name'),
+                        "progress": job.get('progress', 0),
+                    })
+                
+                logger.info(f"Found {len(failed_jobs)} failed ETL jobs")
+            except Exception as etl_error:
+                logger.warning(f"Could not fetch ETL job errors: {etl_error}", exc_info=True)
+            
+            # Also check for tables with no recent updates (potential issues)
             for schema in ['bronze', 'silver', 'gold']:
                 try:
                     cursor.execute("""
-                        SELECT tablename, COALESCE(n_tup_ins, 0) as n_tup_ins, COALESCE(n_tup_upd, 0) as n_tup_upd, COALESCE(n_tup_del, 0) as n_tup_del
-                        FROM pg_stat_user_tables
-                        WHERE schemaname = %s AND COALESCE(n_tup_ins, 0) = 0
+                        SELECT tablename
+                        FROM information_schema.tables
+                        WHERE table_schema = %s
+                        AND table_type = 'BASE TABLE'
                     """, (schema,))
                     
-                    empty_tables = cursor.fetchall()
-                    for table in empty_tables:
-                        tablename = table.get('tablename', 'unknown')
-                        errors.append({
-                            "error_id": f"{schema}_{tablename}_empty",
-                            "type": "empty_table",
-                            "severity": "warning",
-                            "table": f"{schema}.{tablename}",
-                            "message": f"Table {tablename} in {schema} layer has no data",
-                            "occurred_at": datetime.now().isoformat(),
-                            "retry_count": 0,
-                            "status": "active",
-                        })
+                    all_tables = cursor.fetchall()
+                    
+                    # Check if tables exist but have no data
+                    for table in all_tables[:5]:  # Limit to avoid too many errors
+                        tablename = table.get('tablename')
+                        try:
+                            cursor.execute(f"SELECT COUNT(*) as cnt FROM {schema}.{tablename}")
+                            result = cursor.fetchone()
+                            row_count = result.get('cnt', 0) if result else 0
+                            
+                            # Check if table should have data but doesn't (based on ETL jobs)
+                            cursor.execute("""
+                                SELECT COUNT(*) as job_count
+                                FROM monitoring.etl_jobs
+                                WHERE layer = %s AND table_name = %s AND status = 'completed'
+                            """, (schema, tablename))
+                            job_result = cursor.fetchone()
+                            has_completed_jobs = (job_result.get('job_count', 0) or 0) > 0 if job_result else False
+                            
+                            if has_completed_jobs and row_count == 0:
+                                errors.append({
+                                    "error_id": f"{schema}_{tablename}_empty",
+                                    "type": "empty_table",
+                                    "severity": "warning",
+                                    "table": f"{schema}.{tablename}",
+                                    "message": f"Table {tablename} in {schema} layer has no data despite completed ETL jobs",
+                                    "occurred_at": datetime.now().isoformat(),
+                                    "retry_count": 0,
+                                    "status": "active",
+                                })
+                        except Exception:
+                            continue
                 except Exception as schema_error:
                     logger.error(f"Error processing errors for schema {schema}: {schema_error}")
                     continue
             
-            # Check for constraint violations (would need logging table)
-            # For now, return the errors we found
             return {
                 "errors": errors,
                 "total": len(errors),
-                "active": len([e for e in errors if e["status"] == "active"]),
+                "active": len([e for e in errors if e.get("status") == "active"]),
+                "timestamp": datetime.now().isoformat(),
             }
     except Exception as e:
         logger.error(f"Error in get_etl_errors: {e}", exc_info=True)
@@ -261,53 +472,106 @@ async def get_etl_errors():
 
 @router.get("/etl/throughput")
 async def get_throughput_metrics():
-    """Get throughput metrics (records/second)."""
+    """Get throughput metrics (records/second) based on ETL job performance."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
-            # Calculate throughput based on recent insertions
             throughput_data = []
             
-            for schema in ['bronze', 'silver', 'gold']:
-                try:
-                    cursor.execute("""
-                        SELECT 
-                            tablename,
-                            COALESCE(n_tup_ins, 0) as total_inserts,
-                            COALESCE(n_tup_upd, 0) as total_updates,
-                            COALESCE(n_live_tup, 0) as live_tuples
-                        FROM pg_stat_user_tables
-                        WHERE schemaname = %s
-                        ORDER BY COALESCE(n_tup_ins, 0) DESC
-                        LIMIT 5
-                    """, (schema,))
+            # Get throughput from ETL jobs (most accurate)
+            try:
+                cursor.execute("""
+                    SELECT 
+                        layer,
+                        table_name,
+                        records_processed,
+                        started_at,
+                        completed_at,
+                        EXTRACT(EPOCH FROM (completed_at - started_at)) as duration_seconds
+                    FROM monitoring.etl_jobs
+                    WHERE status = 'completed' 
+                    AND completed_at IS NOT NULL 
+                    AND started_at IS NOT NULL
+                    AND records_processed > 0
+                    AND completed_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+                    ORDER BY completed_at DESC
+                """)
+                
+                job_throughput = {}
+                for row in cursor.fetchall():
+                    layer = row.get('layer')
+                    table_name = row.get('table_name')
+                    records = int(row.get('records_processed', 0) or 0)
+                    duration = float(row.get('duration_seconds', 0) or 0)
                     
-                    tables = cursor.fetchall()
+                    if not layer or not table_name or records == 0 or duration == 0:
+                        continue
                     
-                    for table in tables:
-                        # Estimate throughput (assuming 1 hour window for simplicity)
-                        total_inserts = table.get('total_inserts', 0) or 0
-                        total_updates = table.get('total_updates', 0) or 0
-                        total_ops = total_inserts + total_updates
-                        estimated_throughput = total_ops / 3600 if total_ops > 0 else 0
+                    table_key = f"{layer}.{table_name}"
+                    records_per_second = records / duration if duration > 0 else 0
+                    
+                    # Keep the highest throughput for each table
+                    if table_key not in job_throughput or records_per_second > job_throughput[table_key]['records_per_second']:
+                        job_throughput[table_key] = {
+                            "table": table_key,
+                            "layer": layer,
+                            "records_per_second": round(records_per_second, 2),
+                            "total_records": records,
+                            "total_operations": records,
+                            "duration_seconds": round(duration, 2),
+                        }
+                
+                throughput_data = list(job_throughput.values())
+                logger.info(f"Found {len(throughput_data)} tables with ETL job throughput data")
+            except Exception as etl_error:
+                logger.warning(f"Could not fetch ETL job throughput: {etl_error}", exc_info=True)
+            
+            # Fallback to pg_stat_user_tables if no ETL data
+            if not throughput_data:
+                for schema in ['bronze', 'silver', 'gold']:
+                    try:
+                        cursor.execute("""
+                            SELECT 
+                                tablename,
+                                COALESCE(n_tup_ins, 0) as total_inserts,
+                                COALESCE(n_tup_upd, 0) as total_updates,
+                                COALESCE(n_live_tup, 0) as live_tuples
+                            FROM pg_stat_user_tables
+                            WHERE schemaname = %s
+                            ORDER BY COALESCE(n_tup_ins, 0) DESC
+                            LIMIT 5
+                        """, (schema,))
                         
-                        throughput_data.append({
-                            "table": f"{schema}.{table.get('tablename', 'unknown')}",
-                            "layer": schema,
-                            "records_per_second": round(estimated_throughput, 2),
-                            "total_records": table.get('live_tuples', 0) or 0,
-                            "total_operations": total_ops,
-                        })
-                except Exception as schema_error:
-                    logger.error(f"Error processing throughput for schema {schema}: {schema_error}")
-                    continue
+                        tables = cursor.fetchall()
+                        
+                        for table in tables:
+                            total_inserts = table.get('total_inserts', 0) or 0
+                            total_updates = table.get('total_updates', 0) or 0
+                            total_ops = total_inserts + total_updates
+                            # Estimate throughput (assuming 1 hour window)
+                            estimated_throughput = total_ops / 3600 if total_ops > 0 else 0
+                            
+                            throughput_data.append({
+                                "table": f"{schema}.{table.get('tablename', 'unknown')}",
+                                "layer": schema,
+                                "records_per_second": round(estimated_throughput, 2),
+                                "total_records": table.get('live_tuples', 0) or 0,
+                                "total_operations": total_ops,
+                                "duration_seconds": 3600,  # Estimated
+                            })
+                    except Exception as schema_error:
+                        logger.error(f"Error processing throughput for schema {schema}: {schema_error}")
+                        continue
+            
+            # Sort by throughput (highest first)
+            throughput_data.sort(key=lambda x: x['records_per_second'], reverse=True)
             
             # Calculate overall throughput
             total_throughput = sum(t["records_per_second"] for t in throughput_data)
             
             return {
-                "throughput": throughput_data,
+                "throughput": throughput_data[:10],  # Top 10
                 "overall_throughput": round(total_throughput, 2),
                 "timestamp": datetime.now().isoformat(),
             }
@@ -318,44 +582,123 @@ async def get_throughput_metrics():
 
 @router.get("/data-quality")
 async def get_data_quality_metrics():
-    """Get data quality metrics per pipeline stage."""
+    """Get data quality metrics per pipeline stage using real table data and ETL job success rates."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             quality_metrics = {}
             
+            # Get ETL job success rates per table
+            etl_success_rates = {}
+            try:
+                cursor.execute("""
+                    SELECT 
+                        layer,
+                        table_name,
+                        COUNT(*) as total_jobs,
+                        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as successful_jobs,
+                        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_jobs
+                    FROM monitoring.etl_jobs
+                    WHERE started_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+                    GROUP BY layer, table_name
+                """)
+                
+                for row in cursor.fetchall():
+                    layer = row.get('layer')
+                    table_name = row.get('table_name')
+                    total = int(row.get('total_jobs', 0) or 0)
+                    successful = int(row.get('successful_jobs', 0) or 0)
+                    
+                    if layer and table_name and total > 0:
+                        key = f"{layer}.{table_name}"
+                        success_rate = (successful / total) * 100
+                        etl_success_rates[key] = success_rate
+            except Exception as etl_error:
+                logger.warning(f"Could not fetch ETL success rates: {etl_error}")
+            
             for schema in ['bronze', 'silver', 'gold']:
                 try:
-                    # Get table statistics to infer data quality
+                    # Get tables from information_schema first
                     cursor.execute("""
-                        SELECT 
-                            tablename,
-                            COALESCE(n_live_tup, 0) as row_count,
-                            COALESCE(n_dead_tup, 0) as dead_rows,
-                            last_vacuum,
-                            last_autovacuum
-                        FROM pg_stat_user_tables
-                        WHERE schemaname = %s
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = %s
+                        AND table_type = 'BASE TABLE'
+                        ORDER BY table_name
                         LIMIT 10
                     """, (schema,))
                     
-                    tables = cursor.fetchall()
+                    table_names = [row.get('table_name') for row in cursor.fetchall()]
+                    
+                    # If no tables in schema, try to get from ETL jobs
+                    if not table_names:
+                        cursor.execute("""
+                            SELECT DISTINCT table_name
+                            FROM monitoring.etl_jobs
+                            WHERE layer = %s
+                            LIMIT 10
+                        """, (schema,))
+                        table_names = [row.get('table_name') for row in cursor.fetchall()]
+                    
                     table_metrics = []
                     
-                    for table in tables:
-                        row_count = table.get('row_count', 0) or 0
-                        dead_rows = table.get('dead_rows', 0) or 0
+                    for table_name in table_names:
+                        if not table_name:
+                            continue
+                            
+                        row_count = 0
+                        dead_rows = 0
+                        quality_score = 0
                         
-                        # Calculate quality score
-                        if row_count > 0:
-                            dead_row_percentage = (dead_rows / row_count) * 100
-                            quality_score = max(0, 100 - dead_row_percentage)
-                        else:
+                        # Try to get table statistics
+                        try:
+                            cursor.execute(f"""
+                                SELECT 
+                                    COUNT(*) as row_count
+                                FROM {schema}.{table_name}
+                            """)
+                            result = cursor.fetchone()
+                            row_count = int(result.get('row_count', 0) or 0) if result else 0
+                            
+                            # Try to get dead tuples from pg_stat_user_tables
+                            cursor.execute("""
+                                SELECT 
+                                    COALESCE(n_live_tup, 0) as live_tup,
+                                    COALESCE(n_dead_tup, 0) as dead_tup
+                                FROM pg_stat_user_tables
+                                WHERE schemaname = %s AND tablename = %s
+                            """, (schema, table_name))
+                            stat_result = cursor.fetchone()
+                            if stat_result:
+                                live_tup = int(stat_result.get('live_tup', 0) or 0)
+                                dead_tup = int(stat_result.get('dead_tup', 0) or 0)
+                                if live_tup > 0:
+                                    dead_rows = dead_tup
+                                    dead_row_percentage = (dead_tup / live_tup) * 100
+                                    quality_score = max(0, 100 - dead_row_percentage)
+                                elif row_count > 0:
+                                    # Use row_count if pg_stat doesn't have data
+                                    quality_score = 95  # Assume good quality if we have data
+                        except Exception:
+                            # If we can't query the table, use ETL success rate
+                            pass
+                        
+                        # Factor in ETL success rate
+                        table_key = f"{schema}.{table_name}"
+                        if table_key in etl_success_rates:
+                            etl_rate = etl_success_rates[table_key]
+                            # Combine table quality (70%) with ETL success rate (30%)
+                            quality_score = (quality_score * 0.7) + (etl_rate * 0.3)
+                        elif row_count == 0:
+                            # No data and no ETL jobs = poor quality
                             quality_score = 0
+                        elif quality_score == 0 and row_count > 0:
+                            # Has data but no stats = assume good quality
+                            quality_score = 85
                         
                         table_metrics.append({
-                            "table": table.get('tablename', 'unknown'),
+                            "table": table_name,
                             "row_count": row_count,
                             "dead_rows": dead_rows,
                             "quality_score": round(quality_score, 2),
@@ -371,7 +714,7 @@ async def get_data_quality_metrics():
                         "overall_status": "excellent" if avg_quality >= 95 else "good" if avg_quality >= 80 else "fair" if avg_quality >= 60 else "poor",
                     }
                 except Exception as schema_error:
-                    logger.error(f"Error processing quality metrics for schema {schema}: {schema_error}")
+                    logger.error(f"Error processing quality metrics for schema {schema}: {schema_error}", exc_info=True)
                     quality_metrics[schema] = {
                         "tables": [],
                         "average_quality_score": 0,

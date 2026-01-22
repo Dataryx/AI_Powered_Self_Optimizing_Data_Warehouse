@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-from ml_optimization.api.routes import optimization_routes, metrics_routes, recommendation_routes, warehouse_routes, monitoring_routes, storage_routes, alert_routes
+from ml_optimization.api.routes import optimization_routes, metrics_routes, recommendation_routes, warehouse_routes, monitoring_routes, storage_routes, alert_routes, websocket_routes
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ app.include_router(warehouse_routes.router, prefix="/api/v1/warehouse", tags=["D
 app.include_router(monitoring_routes.router, prefix="/api/v1/monitoring", tags=["Monitoring"])
 app.include_router(storage_routes.router, prefix="/api/v1/storage", tags=["Storage"])
 app.include_router(alert_routes.router, prefix="/api/v1/alerts", tags=["Alerts"])
+app.include_router(websocket_routes.router, prefix="/api/v1", tags=["WebSocket"])
 
 
 @app.get("/")

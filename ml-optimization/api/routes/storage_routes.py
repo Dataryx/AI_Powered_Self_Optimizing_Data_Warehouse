@@ -7,6 +7,10 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from datetime import datetime, timedelta
 from ml_optimization.utils.db_utils import get_db_connection
+from psycopg2.extras import RealDictCursor
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -16,7 +20,7 @@ async def get_storage_utilization():
     """Get storage utilization by layer and table."""
     try:
         with get_db_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             utilization = {}
             total_size_bytes = 0
@@ -39,16 +43,16 @@ async def get_storage_utilization():
                 schema_total = 0
                 
                 for table in tables:
-                    size_bytes = table[2] or 0
+                    size_bytes = table.get('size_bytes', 0) or 0
                     schema_total += size_bytes
                     total_size_bytes += size_bytes
                     
                     table_utilization.append({
-                        "table": table[0],
-                        "total_size": table[1],
+                        "table": table.get('tablename', ''),
+                        "total_size": table.get('size_pretty', '0 B'),
                         "size_bytes": size_bytes,
-                        "table_size": table[3],
-                        "index_size": table[4],
+                        "table_size": table.get('table_size', '0 B'),
+                        "index_size": table.get('index_size', '0 B'),
                         "percentage": 0,  # Will calculate after getting total
                     })
                 
@@ -75,6 +79,7 @@ async def get_storage_utilization():
             
             return {"utilization": utilization}
     except Exception as e:
+        logger.error(f"Error fetching storage utilization: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -83,7 +88,7 @@ async def get_growth_trends(days: int = Query(30, description="Number of days to
     """Get data growth trends over time."""
     try:
         with get_db_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             trends = {}
             
@@ -91,7 +96,7 @@ async def get_growth_trends(days: int = Query(30, description="Number of days to
                 # Get row count changes (approximate based on inserts)
                 cursor.execute("""
                     SELECT 
-                        tablename,
+                        relname as tablename,
                         n_tup_ins as total_inserts,
                         n_tup_upd as total_updates,
                         n_tup_del as total_deletes,
@@ -105,8 +110,13 @@ async def get_growth_trends(days: int = Query(30, description="Number of days to
                 tables = cursor.fetchall()
                 
                 # Calculate growth rate (assuming uniform growth over period)
-                schema_total = sum(table[4] or 0 for table in tables)
-                total_ops = sum((table[1] or 0) + (table[2] or 0) - (table[3] or 0) for table in tables)
+                schema_total = sum(table.get('current_rows', 0) or 0 for table in tables)
+                total_ops = sum(
+                    (table.get('total_inserts', 0) or 0) + 
+                    (table.get('total_updates', 0) or 0) - 
+                    (table.get('total_deletes', 0) or 0) 
+                    for table in tables
+                )
                 
                 daily_growth = total_ops / days if days > 0 else 0
                 
@@ -123,9 +133,9 @@ async def get_growth_trends(days: int = Query(30, description="Number of days to
                 date = datetime.now() - timedelta(days=i)
                 point = {
                     "date": date.strftime("%Y-%m-%d"),
-                    "bronze": trends["bronze"]["current_size"] - (trends["bronze"]["daily_growth"] * i),
-                    "silver": trends["silver"]["current_size"] - (trends["silver"]["daily_growth"] * i),
-                    "gold": trends["gold"]["current_size"] - (trends["gold"]["daily_growth"] * i),
+                    "bronze": max(0, trends["bronze"]["current_size"] - (trends["bronze"]["daily_growth"] * i)),
+                    "silver": max(0, trends["silver"]["current_size"] - (trends["silver"]["daily_growth"] * i)),
+                    "gold": max(0, trends["gold"]["current_size"] - (trends["gold"]["daily_growth"] * i)),
                 }
                 trend_points.append(point)
             
@@ -135,6 +145,7 @@ async def get_growth_trends(days: int = Query(30, description="Number of days to
                 "period_days": days,
             }
     except Exception as e:
+        logger.error(f"Error fetching growth trends: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -143,23 +154,23 @@ async def get_compression_stats():
     """Get compression ratio statistics."""
     try:
         with get_db_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             compression_stats = {}
             
             for schema in ['bronze', 'silver', 'gold']:
                 cursor.execute("""
                     SELECT 
-                        tablename,
-                        pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as total_size,
-                        pg_total_relation_size(schemaname||'.'||tablename) as total_bytes,
-                        pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) as table_size,
-                        pg_relation_size(schemaname||'.'||tablename) as table_bytes,
-                        n_live_tup as row_count
-                    FROM pg_tables
-                    JOIN pg_stat_user_tables USING (schemaname, tablename)
-                    WHERE schemaname = %s
-                    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+                        t.tablename,
+                        pg_size_pretty(pg_total_relation_size(t.schemaname||'.'||t.tablename)) as total_size,
+                        pg_total_relation_size(t.schemaname||'.'||t.tablename) as total_bytes,
+                        pg_size_pretty(pg_relation_size(t.schemaname||'.'||t.tablename)) as table_size,
+                        pg_relation_size(t.schemaname||'.'||t.tablename) as table_bytes,
+                        COALESCE(s.n_live_tup, 0) as row_count
+                    FROM pg_tables t
+                    LEFT JOIN pg_stat_user_tables s ON t.schemaname = s.schemaname AND t.tablename = s.relname
+                    WHERE t.schemaname = %s
+                    ORDER BY pg_total_relation_size(t.schemaname||'.'||t.tablename) DESC
                     LIMIT 10
                 """, (schema,))
                 
@@ -167,9 +178,9 @@ async def get_compression_stats():
                 table_stats = []
                 
                 for table in tables:
-                    total_bytes = table[2] or 0
-                    table_bytes = table[4] or 0
-                    row_count = table[5] or 0
+                    total_bytes = table.get('total_bytes', 0) or 0
+                    table_bytes = table.get('table_bytes', 0) or 0
+                    row_count = table.get('row_count', 0) or 0
                     
                     # Calculate compression ratio
                     # Estimate: Assume average row size would be larger without compression
@@ -184,9 +195,9 @@ async def get_compression_stats():
                         compression_percentage = 0
                     
                     table_stats.append({
-                        "table": table[0],
-                        "total_size": table[1],
-                        "table_size": table[3],
+                        "table": table.get('tablename', ''),
+                        "total_size": table.get('total_size', '0 B'),
+                        "table_size": table.get('table_size', '0 B'),
                         "row_count": row_count,
                         "compression_ratio": round(compression_ratio, 2),
                         "compression_percentage": round(compression_percentage, 2),
@@ -202,6 +213,7 @@ async def get_compression_stats():
             
             return {"compression": compression_stats}
     except Exception as e:
+        logger.error(f"Error fetching compression stats: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -210,13 +222,13 @@ async def get_cache_performance():
     """Get cache performance metrics."""
     try:
         with get_db_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # Get PostgreSQL cache statistics
             cursor.execute("""
                 SELECT 
                     schemaname,
-                    tablename,
+                    relname as tablename,
                     heap_blks_read as disk_reads,
                     heap_blks_hit as cache_hits,
                     CASE 
@@ -237,16 +249,16 @@ async def get_cache_performance():
             total_reads = 0
             
             for stat in cache_stats:
-                disk_reads = stat[2] or 0
-                cache_hits = stat[3] or 0
-                hit_rate = stat[4] or 0
+                disk_reads = stat.get('disk_reads', 0) or 0
+                cache_hits = stat.get('cache_hits', 0) or 0
+                hit_rate = stat.get('hit_rate', 0) or 0
                 
                 total_hits += cache_hits
                 total_reads += disk_reads
                 
                 tables.append({
-                    "table": f"{stat[0]}.{stat[1]}",
-                    "schema": stat[0],
+                    "table": f"{stat.get('schemaname', '')}.{stat.get('tablename', '')}",
+                    "schema": stat.get('schemaname', ''),
                     "cache_hits": cache_hits,
                     "disk_reads": disk_reads,
                     "hit_rate": round(hit_rate, 2),
@@ -265,6 +277,7 @@ async def get_cache_performance():
                 },
             }
     except Exception as e:
+        logger.error(f"Error fetching cache performance: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -273,7 +286,7 @@ async def get_resource_allocation():
     """Get resource allocation history."""
     try:
         with get_db_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # Get connection and activity information
             cursor.execute("""
@@ -289,18 +302,20 @@ async def get_resource_allocation():
             
             # Get database size
             cursor.execute("SELECT pg_size_pretty(pg_database_size(current_database())) as db_size")
-            db_size = cursor.fetchone()[0]
+            db_size_result = cursor.fetchone()
+            db_size = db_size_result.get('db_size', '0 B') if db_size_result else '0 B'
             
             return {
                 "connections": {
-                    "total": connection_stats[0] or 0,
-                    "active": connection_stats[1] or 0,
-                    "idle": connection_stats[2] or 0,
+                    "total": connection_stats.get('total_connections', 0) or 0 if connection_stats else 0,
+                    "active": connection_stats.get('active_connections', 0) or 0 if connection_stats else 0,
+                    "idle": connection_stats.get('idle_connections', 0) or 0 if connection_stats else 0,
                 },
                 "database_size": db_size,
                 "timestamp": datetime.now().isoformat(),
             }
     except Exception as e:
+        logger.error(f"Error fetching resource allocation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -309,7 +324,7 @@ async def get_cost_tracking():
     """Get cost tracking information."""
     try:
         with get_db_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             cost_breakdown = {}
             
@@ -319,14 +334,18 @@ async def get_cost_tracking():
             
             for schema in ['bronze', 'silver', 'gold']:
                 cursor.execute("""
-                    SELECT SUM(pg_total_relation_size(schemaname||'.'||tablename))
+                    SELECT SUM(pg_total_relation_size(schemaname||'.'||tablename)) as total_bytes
                     FROM pg_tables
                     WHERE schemaname = %s
                 """, (schema,))
                 
-                total_bytes = cursor.fetchone()[0] or 0
+                result = cursor.fetchone()
+                total_bytes = result.get('total_bytes', 0) or 0 if result else 0
+                # Convert to float if it's a Decimal
+                if hasattr(total_bytes, '__float__'):
+                    total_bytes = float(total_bytes)
                 total_gb = total_bytes / (1024**3)
-                monthly_cost = total_gb * COST_PER_GB_MONTH
+                monthly_cost = float(total_gb) * COST_PER_GB_MONTH
                 
                 cost_breakdown[schema] = {
                     "storage_gb": round(total_gb, 2),
@@ -346,5 +365,6 @@ async def get_cost_tracking():
                 "currency": "USD",
             }
     except Exception as e:
+        logger.error(f"Error fetching cost tracking: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -68,25 +68,79 @@ const truncateProductName = (name: string, maxLength: number = 30) => {
 
 export const TopProductsChart: React.FC<TopProductsChartProps> = ({ data }) => {
   const chartData = useMemo(() => {
-    return data
-      .sort((a, b) => b.revenue - a.revenue) // Ensure sorted by revenue
+    const safeData = data || [];
+    if (safeData.length === 0) {
+      // Return empty array - chart will show empty state
+      return [];
+    }
+    return safeData
+      .sort((a, b) => (b.revenue || 0) - (a.revenue || 0)) // Ensure sorted by revenue
       .slice(0, 10) // Take top 10
       .map((item, index) => ({
         rank: index + 1,
-        name: truncateProductName(item.product, 28),
-        fullName: item.product,
-        revenue: item.revenue,
-        sales: item.sales_count,
-        quantity: item.quantity,
+        name: truncateProductName(item.product || 'Unknown Product', 28),
+        fullName: item.product || 'Unknown Product',
+        revenue: item.revenue || 0,
+        sales: item.sales_count || 0,
+        quantity: item.quantity || 0,
         colorStart: GRADIENT_COLORS[index % GRADIENT_COLORS.length][0],
         colorEnd: GRADIENT_COLORS[index % GRADIENT_COLORS.length][1],
-        avgRevenue: item.revenue / item.sales_count,
+        avgRevenue: (item.revenue || 0) / (item.sales_count || 1),
       }));
   }, [data]);
 
   const totalRevenue = useMemo(() => {
     return chartData.reduce((sum, item) => sum + item.revenue, 0);
   }, [chartData]);
+
+  // Show empty state if no data
+  if (chartData.length === 0) {
+    return (
+      <Card
+        sx={{
+          height: '100%',
+          background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+          border: '1px solid rgba(236, 72, 153, 0.1)',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.08)',
+        }}
+      >
+        <CardContent sx={{ p: 2.5 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 700,
+                background: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)',
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                letterSpacing: '-0.01em',
+                fontSize: '1.1rem',
+              }}
+            >
+              Top Products by Revenue
+            </Typography>
+            <Chip
+              label="No data"
+              size="small"
+              sx={{
+                backgroundColor: 'rgba(236, 72, 153, 0.1)',
+                color: '#ec4899',
+                fontWeight: 600,
+                fontSize: '0.75rem',
+                height: '24px',
+              }}
+            />
+          </Box>
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              No product data available
+            </Typography>
+          </Box>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card

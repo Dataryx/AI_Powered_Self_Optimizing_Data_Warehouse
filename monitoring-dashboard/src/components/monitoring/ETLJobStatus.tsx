@@ -3,7 +3,7 @@
  * Displays ETL job status and progress with modern UI
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, Typography, Box, LinearProgress, Chip, Grid, IconButton } from '@mui/material';
 import { PlayCircle, CheckCircle, Error as ErrorIcon, Refresh, Schedule } from '@mui/icons-material';
 import { apiService } from '../../services/api';
@@ -29,11 +29,13 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
   const [loading, setLoading] = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
 
-  const fetchJobs = async () => {
+  const fetchJobs = useCallback(async () => {
     try {
       setError(null);
       const data = await apiService.getETLJobs();
+      console.log('Fetched ETL jobs:', data.jobs?.length || 0);
       setJobs(data.jobs || []);
       setLastFetch(new Date());
       setLoading(false);
@@ -43,13 +45,111 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
       setError(errorMessage);
       setLoading(false);
     }
-  };
+  }, []);
 
+  // WebSocket connection for real-time updates with HTTP fallback
   useEffect(() => {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000';
+    const wsUrl = `${wsHost}/api/v1/ws/etl-jobs`;
+    
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout;
+    let httpPollInterval: NodeJS.Timeout;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 3;
+    let useWebSocket = true;
+
+    // Always fetch initial data via HTTP
     fetchJobs();
-    const interval = setInterval(fetchJobs, 8000); // Refresh every 8 seconds for real-time updates
-    return () => clearInterval(interval);
-  }, [refreshKey]); // Re-run when refreshKey changes
+
+    const connectWebSocket = () => {
+      if (!useWebSocket) return;
+      
+      try {
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          console.log('WebSocket connected for ETL jobs');
+          setWsConnected(true);
+          setError(null);
+          reconnectAttempts = 0;
+          // Clear HTTP polling when WebSocket is connected
+          if (httpPollInterval) {
+            clearInterval(httpPollInterval);
+          }
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'etl_jobs') {
+              setJobs(data.jobs || []);
+              setLastFetch(new Date());
+              setLoading(false);
+            } else if (data.type === 'error') {
+              console.error('WebSocket error message:', data.message);
+            }
+          } catch (err) {
+            console.error('Error parsing WebSocket message:', err);
+          }
+        };
+        
+        ws.onerror = (err) => {
+          console.error('WebSocket error:', err);
+          setWsConnected(false);
+        };
+        
+        ws.onclose = (event) => {
+          console.log('WebSocket disconnected', event.code, event.reason);
+          setWsConnected(false);
+          
+          // Attempt to reconnect
+          if (reconnectAttempts < maxReconnectAttempts && useWebSocket) {
+            reconnectAttempts++;
+            reconnectTimeout = setTimeout(() => {
+              connectWebSocket();
+            }, Math.min(1000 * Math.pow(2, reconnectAttempts), 5000));
+          } else {
+            // Fallback to HTTP polling after max attempts
+            console.log('Falling back to HTTP polling');
+            useWebSocket = false;
+            if (!httpPollInterval) {
+              httpPollInterval = setInterval(fetchJobs, 5000);
+            }
+          }
+        };
+      } catch (err) {
+        console.error('Error creating WebSocket:', err);
+        setWsConnected(false);
+        useWebSocket = false;
+        // Fallback to HTTP polling
+        if (!httpPollInterval) {
+          httpPollInterval = setInterval(fetchJobs, 5000);
+        }
+      }
+    };
+
+    // Try WebSocket connection
+    connectWebSocket();
+
+    // Set up HTTP polling as fallback (runs every 8 seconds)
+    if (!httpPollInterval) {
+      httpPollInterval = setInterval(fetchJobs, 8000);
+    }
+
+    return () => {
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+      if (httpPollInterval) {
+        clearInterval(httpPollInterval);
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
+  }, [refreshKey, fetchJobs]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -77,7 +177,18 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
     }
   };
 
-  if (loading && jobs.length === 0) {
+  // Debug logging
+  useEffect(() => {
+    console.log('ETLJobStatus state:', { 
+      loading, 
+      jobsCount: jobs.length, 
+      error, 
+      wsConnected,
+      refreshKey 
+    });
+  }, [loading, jobs.length, error, wsConnected, refreshKey]);
+
+  if (loading && jobs.length === 0 && !error) {
     return (
       <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(99, 102, 241, 0.1)' }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
@@ -106,7 +217,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
     );
   }
 
-  if (jobs.length === 0) {
+  if (!loading && jobs.length === 0) {
     return (
       <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(99, 102, 241, 0.1)' }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
@@ -114,9 +225,12 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
           <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', mb: 1 }}>
             No ETL Jobs Found
           </Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
             No ETL jobs are currently available. Jobs will appear here when data is processed.
           </Typography>
+          <IconButton onClick={fetchJobs} sx={{ color: '#6366f1', mt: 1 }}>
+            <Refresh /> Refresh
+          </IconButton>
         </CardContent>
       </Card>
     );
@@ -132,19 +246,32 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
     >
       <CardContent sx={{ p: 2.5 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
-          <Typography
-            variant="h6"
-            sx={{
-              fontWeight: 700,
-              background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              fontSize: '1.1rem',
-            }}
-          >
-            ETL Job Status
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 700,
+                background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                fontSize: '1.1rem',
+              }}
+            >
+              ETL Job Status
+            </Typography>
+            <Chip
+              label={wsConnected ? 'Live' : 'Polling'}
+              size="small"
+              sx={{
+                backgroundColor: wsConnected ? '#10b981' : '#64748b',
+                color: 'white',
+                fontWeight: 600,
+                fontSize: '0.7rem',
+                height: '20px',
+              }}
+            />
+          </Box>
           <IconButton size="small" onClick={fetchJobs} sx={{ color: '#6366f1' }}>
             <Refresh />
           </IconButton>

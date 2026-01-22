@@ -65,31 +65,30 @@ export const DashboardPage: React.FC = () => {
     };
   }, []);
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
-        <CircularProgress size={60} />
-      </Box>
-    );
-  }
+  // Default/empty data structure
+  const defaultSummary = {
+    bronze: { table_count: 0, estimated_rows: 0, total_size: '0 MB' },
+    silver: { table_count: 0, estimated_rows: 0, total_size: '0 MB' },
+    gold: { table_count: 0, estimated_rows: 0, total_size: '0 MB' },
+  };
 
-  if (error) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error">{error}</Alert>
-      </Box>
-    );
-  }
+  const displaySummary = warehouseSummary?.warehouse_summary || defaultSummary;
+  const displaySalesStats = salesStats || {
+    total_sales: { count: 0, revenue: 0, avg_sale: 0 },
+    daily_sales: [],
+    top_products: [],
+  };
+  const displayCustomerStats = customerStats || { total_customers: 0 };
 
   const totalRows =
-    (warehouseSummary?.warehouse_summary?.bronze?.estimated_rows || 0) +
-    (warehouseSummary?.warehouse_summary?.silver?.estimated_rows || 0) +
-    (warehouseSummary?.warehouse_summary?.gold?.estimated_rows || 0);
+    (displaySummary.bronze?.estimated_rows || 0) +
+    (displaySummary.silver?.estimated_rows || 0) +
+    (displaySummary.gold?.estimated_rows || 0);
 
   const totalTables =
-    (warehouseSummary?.warehouse_summary?.bronze?.table_count || 0) +
-    (warehouseSummary?.warehouse_summary?.silver?.table_count || 0) +
-    (warehouseSummary?.warehouse_summary?.gold?.table_count || 0);
+    (displaySummary.bronze?.table_count || 0) +
+    (displaySummary.silver?.table_count || 0) +
+    (displaySummary.gold?.table_count || 0);
 
   return (
     <Box
@@ -122,12 +121,20 @@ export const DashboardPage: React.FC = () => {
         </Typography>
       </Box>
 
-      {/* Warehouse Overview */}
-      {warehouseSummary && (
-        <Box sx={{ mb: 3 }}>
-          <WarehouseOverview summary={warehouseSummary.warehouse_summary} />
-        </Box>
-      )}
+      {/* Warehouse Overview - Always show */}
+      <Box sx={{ mb: 3 }}>
+        {error && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            API unavailable. Showing placeholder data. {error}
+          </Alert>
+        )}
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 2 }}>
+            <CircularProgress size={40} />
+          </Box>
+        )}
+        <WarehouseOverview summary={displaySummary} />
+      </Box>
 
       {/* Key Statistics */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -152,58 +159,54 @@ export const DashboardPage: React.FC = () => {
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             title="Total Sales"
-            value={salesStats?.total_sales?.count?.toLocaleString() || '0'}
+            value={displaySalesStats.total_sales?.count?.toLocaleString() || '0'}
             icon={<ShoppingCart sx={{ fontSize: 32 }} />}
             color="#4caf50"
-            subtitle="Sales transactions"
+            subtitle={error ? 'API unavailable' : 'Sales transactions'}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             title="Total Revenue"
-            value={`$${(salesStats?.total_sales?.revenue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+            value={`$${(displaySalesStats.total_sales?.revenue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
             icon={<AttachMoney sx={{ fontSize: 32 }} />}
             color="#ff9800"
-            subtitle="From all sales"
+            subtitle={error ? 'API unavailable' : 'From all sales'}
           />
         </Grid>
       </Grid>
 
-      {/* Sales Statistics */}
-      {salesStats && (
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={12} md={6}>
-            <StatCard
-              title="Average Sale Value"
-              value={`$${(salesStats.total_sales?.avg_sale || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
-              icon={<TrendingUp sx={{ fontSize: 32 }} />}
-              color="#9c27b0"
-              subtitle="Per transaction"
-            />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <StatCard
-              title="Total Customers"
-              value={(customerStats?.total_customers || 0).toLocaleString()}
-              icon={<People sx={{ fontSize: 32 }} />}
-              color="#0288d1"
-              subtitle="Registered customers"
-            />
-          </Grid>
+      {/* Sales Statistics - Always show */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={12} md={6}>
+          <StatCard
+            title="Average Sale Value"
+            value={`$${(displaySalesStats.total_sales?.avg_sale || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+            icon={<TrendingUp sx={{ fontSize: 32 }} />}
+            color="#9c27b0"
+            subtitle={error ? 'API unavailable' : 'Per transaction'}
+          />
         </Grid>
-      )}
+        <Grid item xs={12} md={6}>
+          <StatCard
+            title="Total Customers"
+            value={(displayCustomerStats.total_customers || 0).toLocaleString()}
+            icon={<People sx={{ fontSize: 32 }} />}
+            color="#0288d1"
+            subtitle={error ? 'API unavailable' : 'Registered customers'}
+          />
+        </Grid>
+      </Grid>
 
-      {/* Charts */}
-      {salesStats && (
-        <Grid container spacing={2}>
-          <Grid item xs={12} lg={8}>
-            <SalesChart data={salesStats.daily_sales || []} />
-          </Grid>
-          <Grid item xs={12} lg={4}>
-            <TopProductsChart data={salesStats.top_products || []} />
-          </Grid>
+      {/* Charts - Always show */}
+      <Grid container spacing={2}>
+        <Grid item xs={12} lg={8}>
+          <SalesChart data={displaySalesStats.daily_sales || []} />
         </Grid>
-      )}
+        <Grid item xs={12} lg={4}>
+          <TopProductsChart data={displaySalesStats.top_products || []} />
+        </Grid>
+      </Grid>
 
       {/* Additional Info */}
       <Paper
@@ -238,7 +241,7 @@ export const DashboardPage: React.FC = () => {
               Database
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
-              {warehouseSummary?.database || 'N/A'}
+              {warehouseSummary?.database || (error ? 'API unavailable' : 'N/A')}
             </Typography>
           </Box>
           <Box>

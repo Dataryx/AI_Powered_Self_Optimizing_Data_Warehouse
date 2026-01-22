@@ -137,7 +137,25 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
             const layerColor = getLayerColor(layer);
             const layerNodes = layerGroups[layer];
 
-            if (layerNodes.length === 0) return null;
+            // Show placeholder for empty layers instead of returning null
+            if (layerNodes.length === 0) {
+              return (
+                <Grid item xs={12} md={4} key={layer}>
+                  <Paper
+                    sx={{
+                      p: 2,
+                      textAlign: 'center',
+                      background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
+                      border: `1px solid ${layerColors.bg}30`,
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                      {layer.toUpperCase()} Layer: No nodes available
+                    </Typography>
+                  </Paper>
+                </Grid>
+              );
+            }
 
             return (
               <Box key={layer}>

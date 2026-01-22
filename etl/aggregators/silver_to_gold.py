@@ -16,10 +16,11 @@ logger = logging.getLogger(__name__)
 class SilverToGoldAggregator:
     """Aggregates Silver layer data to Gold layer."""
     
-    def __init__(self, connection):
+    def __init__(self, connection, tracker=None):
         """Initialize aggregator with database connection."""
         self.connection = connection
         self.cursor = connection.cursor()
+        self.tracker = tracker
     
     def table_is_empty(self, schema: str, table: str) -> bool:
         """Check if a table is empty."""
@@ -301,6 +302,17 @@ class SilverToGoldAggregator:
         logger.info("Processing last 30 days of sales data...")
         logger.info("")
         
+        daily_job_id = None
+        if self.tracker:
+            daily_job_id = self.tracker.start_job(
+                "GOLD - Daily Sales Aggregation",
+                "aggregation",
+                "gold",
+                "daily_sales_summary",
+                30
+            )
+            self.tracker.update_progress(daily_job_id, 0)
+        
         daily_start = time.time()
         daily_count = 0
         for i in range(30):
@@ -310,9 +322,19 @@ class SilverToGoldAggregator:
                 daily_count += 1
                 if daily_count % 5 == 0:
                     logger.info(f"  Processed {daily_count}/30 days...")
+            
+            # Update progress
+            if self.tracker and daily_job_id:
+                progress = int((daily_count / 30) * 100)
+                self.tracker.update_progress(daily_job_id, progress, daily_count)
         
         daily_elapsed = time.time() - daily_start
         totals['daily_sales'] = daily_count
+        
+        if self.tracker and daily_job_id:
+            self.tracker.update_progress(daily_job_id, 100, daily_count)
+            self.tracker.complete_job(daily_job_id, daily_count)
+        
         logger.info("")
         logger.info(f"✓ Daily Sales Aggregation Complete")
         logger.info(f"  Days aggregated: {daily_count}/30")
@@ -326,10 +348,33 @@ class SilverToGoldAggregator:
         logger.info("Calculating RFM scores and customer segments...")
         logger.info("")
         
+        customer_job_id = None
+        if self.tracker:
+            # Get customer count for progress tracking
+            try:
+                self.cursor.execute("SELECT COUNT(*) FROM silver.customer WHERE is_valid = TRUE;")
+                customer_total = self.cursor.fetchone()[0]
+            except:
+                customer_total = None
+            
+            customer_job_id = self.tracker.start_job(
+                "GOLD - Customer Lifetime Aggregation",
+                "aggregation",
+                "gold",
+                "agg_customer_lifetime",
+                customer_total
+            )
+            self.tracker.update_progress(customer_job_id, 0)
+        
         customer_start = time.time()
         customer_count = self.aggregate_customer_lifetime()
         customer_elapsed = time.time() - customer_start
         totals['customer_lifetime'] = customer_count
+        
+        if self.tracker and customer_job_id:
+            self.tracker.update_progress(customer_job_id, 100, customer_count)
+            self.tracker.complete_job(customer_job_id, customer_count)
+        
         logger.info("")
         logger.info(f"✓ Customer Lifetime Aggregation Complete")
         logger.info(f"  Customers aggregated: {customer_count:,}")
@@ -343,10 +388,26 @@ class SilverToGoldAggregator:
         logger.info("Calculating monthly sales by product category...")
         logger.info("")
         
+        product_job_id = None
+        if self.tracker:
+            product_job_id = self.tracker.start_job(
+                "GOLD - Monthly Product Sales Aggregation",
+                "aggregation",
+                "gold",
+                "agg_monthly_product_sales",
+                None
+            )
+            self.tracker.update_progress(product_job_id, 0)
+        
         product_start = time.time()
         product_count = self.aggregate_monthly_product_sales()
         product_elapsed = time.time() - product_start
         totals['monthly_product_sales'] = product_count
+        
+        if self.tracker and product_job_id:
+            self.tracker.update_progress(product_job_id, 100, product_count)
+            self.tracker.complete_job(product_job_id, product_count)
+        
         logger.info("")
         logger.info(f"✓ Monthly Product Sales Aggregation Complete")
         logger.info(f"  Monthly records aggregated: {product_count:,}")

@@ -162,15 +162,15 @@ export const MonitoringDashboard: React.FC = () => {
         <PipelineDAG key={`dag-${refreshKey}`} />
       </Box>
 
-      {/* ETL Job Status and Data Freshness */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} lg={8}>
-          <ETLJobStatus key={`jobs-${refreshKey}`} />
-        </Grid>
-        <Grid item xs={12} lg={4}>
-          <DataFreshness key={`freshness-${refreshKey}`} />
-        </Grid>
-      </Grid>
+      {/* ETL Job Status */}
+      <Box sx={{ mb: 3 }}>
+        <ETLJobStatus key={`jobs-${refreshKey}`} />
+      </Box>
+
+      {/* Data Freshness Indicators */}
+      <Box sx={{ mb: 3 }}>
+        <DataFreshness key={`freshness-${refreshKey}`} />
+      </Box>
 
       {/* Throughput Metrics */}
       <Box sx={{ mb: 3 }}>
@@ -179,10 +179,10 @@ export const MonitoringDashboard: React.FC = () => {
 
       {/* Error Tracker and Data Quality */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} lg={6}>
+        <Grid item xs={12} lg={6} sx={{ display: 'flex' }}>
           <ErrorRetryTracker key={`errors-${refreshKey}`} />
         </Grid>
-        <Grid item xs={12} lg={6}>
+        <Grid item xs={12} lg={6} sx={{ display: 'flex' }}>
           <DataQualityMetrics key={`quality-${refreshKey}`} />
         </Grid>
       </Grid>
