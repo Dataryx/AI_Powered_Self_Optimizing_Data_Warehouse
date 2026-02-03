@@ -77,7 +77,7 @@ const slideOut = keyframes`
   }
 `;
 
-const ITEMS_PER_PAGE = 4;
+const ITEMS_PER_PAGE = 3;
 
 export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey = 0 }) => {
   const [cache, setCache] = useState<CacheData | null>(null);
@@ -116,6 +116,16 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
         return { bg: '#ef4444', light: '#ef444420', border: '#ef444440', icon: ErrorIcon };
       default:
         return { bg: '#64748b', light: '#64748b20', border: '#64748b40', icon: Warning };
+    }
+  };
+
+  const getHitRateStatus = (hitRate: number) => {
+    if (hitRate > 70) {
+      return { label: 'Healthy', color: '#10b981' };
+    } else if (hitRate >= 40) {
+      return { label: 'Fair', color: '#f59e0b' };
+    } else {
+      return { label: 'Poor', color: '#ef4444' };
     }
   };
 
@@ -321,9 +331,27 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
                 <Typography variant="caption" sx={{ color: overallStatus.bg, fontWeight: 600, display: 'block', fontSize: '0.6rem' }}>
                   Overall Hit Rate
                 </Typography>
-                <Typography variant="body2" sx={{ fontWeight: 700, color: overallStatus.bg, fontSize: '0.8rem' }}>
-                  {cache.overall.hit_rate.toFixed(1)}%
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: overallStatus.bg, fontSize: '0.8rem' }}>
+                    {cache.overall.hit_rate.toFixed(1)}%
+                  </Typography>
+                  <Chip
+                    label={getHitRateStatus(cache.overall.hit_rate).label}
+                    size="small"
+                    sx={{
+                      height: '14px',
+                      fontSize: '0.55rem',
+                      fontWeight: 600,
+                      backgroundColor: getHitRateStatus(cache.overall.hit_rate).color + '15',
+                      color: getHitRateStatus(cache.overall.hit_rate).color,
+                      border: `1px solid ${getHitRateStatus(cache.overall.hit_rate).color}30`,
+                      '& .MuiChip-label': {
+                        padding: '0 4px',
+                        lineHeight: '14px',
+                      },
+                    }}
+                  />
+                </Box>
               </Box>
             </Box>
             <Tooltip title="Refresh">
@@ -418,6 +446,13 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
           </Grid>
         </Grid>
 
+        {/* Explanation Text */}
+        <Box sx={{ mb: 2, px: 1 }}>
+          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', fontStyle: 'italic', lineHeight: 1.5 }}>
+            Low hit rates may indicate missing partitions or skewed access patterns.
+          </Typography>
+        </Box>
+
         {/* Table Details */}
         <Box
           sx={{
@@ -426,38 +461,43 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
               : `${slideIn} 0.3s ease-out forwards`,
           }}
         >
-          <Grid container spacing={1} sx={{ mb: cache.tables.length > ITEMS_PER_PAGE ? 1 : 0 }}>
+          <Grid container spacing={1.5} sx={{ mb: cache.tables.length > ITEMS_PER_PAGE ? 1 : 0 }} alignItems="stretch">
             {currentTables.map((table, index) => {
               const statusColors = getStatusColor(table.status);
               const StatusIcon = statusColors.icon;
 
               return (
-                <Grid item xs={12} sm={6} key={`${table.table}-${startIndex + index}`}>
+                <Grid item xs={12} sm={6} md={4} key={`${table.table}-${startIndex + index}`}>
                   <Card
+                    elevation={0}
                     sx={{
-                      p: 0.75,
-                      background: `linear-gradient(135deg, ${statusColors.light} 0%, rgba(255,255,255,0.9) 100%)`,
-                      border: `1px solid ${statusColors.border}`,
-                      borderRadius: 1.25,
-                      transition: 'all 0.3s',
+                      p: 1,
+                      background: '#ffffff',
+                      border: `1.5px solid ${statusColors.border}`,
+                      borderRadius: 1.5,
+                      transition: 'all 0.2s',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
                       '&:hover': {
-                        transform: 'translateY(-1px)',
-                        boxShadow: `0 4px 8px ${statusColors.border}`,
+                        transform: 'translateY(-2px)',
+                        boxShadow: `0 4px 12px ${statusColors.border}30`,
+                        borderColor: statusColors.bg,
                       },
                     }}
                   >
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.75, flexShrink: 0 }}>
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography
                           variant="body2"
                           sx={{
-                            fontWeight: 700,
-                            color: 'text.primary',
-                            fontSize: '0.65rem',
+                            fontWeight: 600,
+                            color: '#0f172a',
+                            fontSize: '0.7rem',
                             mb: 0.4,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
+                            lineHeight: 1.3,
+                            wordBreak: 'break-word',
                           }}
                           title={table.table}
                         >
@@ -470,31 +510,32 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
                             backgroundColor: statusColors.light,
                             color: statusColors.bg,
                             fontWeight: 600,
-                            fontSize: '0.55rem',
+                            fontSize: '0.625rem',
                             height: '16px',
+                            border: `1px solid ${statusColors.border}40`,
                             '& .MuiChip-label': {
                               padding: '0 6px',
                             },
                           }}
                         />
                       </Box>
-                      <StatusIcon sx={{ color: statusColors.bg, fontSize: 14 }} />
+                      <StatusIcon sx={{ color: statusColors.bg, fontSize: 14, ml: 0.5, flexShrink: 0 }} />
                     </Box>
 
-                    <Box sx={{ mb: 0.5 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.4 }}>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
+                    <Box sx={{ mb: 0.75, flexShrink: 0 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.4 }}>
+                        <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.65rem', fontWeight: 500 }}>
                           Hit Rate
                         </Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700, color: statusColors.bg, fontSize: '0.7rem' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: statusColors.bg, fontSize: '0.75rem' }}>
                           {table.hit_rate.toFixed(1)}%
                         </Typography>
                       </Box>
                       <Box
                         sx={{
-                          height: 3,
-                          borderRadius: 1.5,
-                          backgroundColor: `${statusColors.bg}20`,
+                          height: 3.5,
+                          borderRadius: 1.75,
+                          backgroundColor: `${statusColors.bg}15`,
                           position: 'relative',
                           overflow: 'hidden',
                         }}
@@ -504,27 +545,43 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
                             height: '100%',
                             width: `${table.hit_rate}%`,
                             background: `linear-gradient(90deg, ${statusColors.bg} 0%, ${statusColors.bg}80 100%)`,
-                            borderRadius: 1.5,
+                            borderRadius: 1.75,
                             transition: 'width 0.3s',
                           }}
                         />
                       </Box>
                     </Box>
 
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.75 }}>
-                      <Box>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', fontSize: '0.55rem' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, flexShrink: 0, mt: 'auto' }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="caption" sx={{ color: '#64748b', display: 'block', fontSize: '0.625rem', mb: 0.2 }}>
                           Hits
                         </Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#10b981', fontSize: '0.65rem' }}>
+                        <Typography 
+                          variant="body2" 
+                          sx={{ 
+                            fontWeight: 600, 
+                            color: '#10b981', 
+                            fontSize: '0.7rem',
+                            wordBreak: 'break-word',
+                          }}
+                        >
                           {table.cache_hits.toLocaleString()}
                         </Typography>
                       </Box>
-                      <Box>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', fontSize: '0.55rem' }}>
+                      <Box sx={{ flex: 1, minWidth: 0, textAlign: 'right' }}>
+                        <Typography variant="caption" sx={{ color: '#64748b', display: 'block', fontSize: '0.625rem', mb: 0.2 }}>
                           Disk Reads
                         </Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#ef4444', fontSize: '0.65rem' }}>
+                        <Typography 
+                          variant="body2" 
+                          sx={{ 
+                            fontWeight: 600, 
+                            color: '#ef4444', 
+                            fontSize: '0.7rem',
+                            wordBreak: 'break-word',
+                          }}
+                        >
                           {table.disk_reads.toLocaleString()}
                         </Typography>
                       </Box>
@@ -546,7 +603,7 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center',
-              gap: 0.25,
+              gap: 1,
               px: 0.5,
             }}
           >
@@ -557,8 +614,8 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
               sx={{
                 p: 0.25,
                 minWidth: 'auto',
-                width: '18px',
-                height: '18px',
+                width: '20px',
+                height: '20px',
                 color: '#10b981',
                 '&:disabled': {
                   opacity: 0.3,
@@ -568,44 +625,43 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
                 },
               }}
             >
-              <ChevronLeft sx={{ fontSize: '12px' }} />
+              <ChevronLeft sx={{ fontSize: '14px' }} />
             </IconButton>
-            <Pagination
-              count={totalPages}
-              page={currentPage}
-              onChange={handlePageChange}
-              size="small"
-              siblingCount={0}
-              boundaryCount={1}
-              hidePrevButton
-              hideNextButton
-              sx={{
-                '& .MuiPagination-ul': {
-                  flexWrap: 'nowrap',
-                  gap: 0.25,
-                  justifyContent: 'center',
-                },
-                '& .MuiPaginationItem-root': {
-                  minWidth: '18px',
-                  height: '18px',
-                  fontSize: '0.6rem',
-                  padding: 0,
-                  margin: 0,
-                  color: '#10b981',
-                  '&.Mui-selected': {
-                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                    color: '#10b981',
-                    fontWeight: 700,
-                    '&:hover': {
-                      backgroundColor: 'rgba(16, 185, 129, 0.3)',
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                <Box
+                  key={pageNum}
+                  component="button"
+                  onClick={() => handlePageChange({} as React.ChangeEvent<unknown>, pageNum)}
+                  disabled={isAnimating}
+                  sx={{
+                    minWidth: '32px',
+                    height: '32px',
+                    fontSize: '0.8rem',
+                    fontWeight: currentPage === pageNum ? 700 : 500,
+                    color: currentPage === pageNum ? '#10b981' : '#64748b',
+                    backgroundColor: currentPage === pageNum ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                    border: currentPage === pageNum ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid transparent',
+                    borderRadius: 1,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s',
+                    '&:hover:not(:disabled)': {
+                      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                      borderColor: 'rgba(16, 185, 129, 0.2)',
                     },
-                  },
-                  '&:hover': {
-                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                  },
-                },
-              }}
-            />
+                    '&:disabled': {
+                      opacity: 0.5,
+                      cursor: 'not-allowed',
+                    },
+                  }}
+                >
+                  {pageNum}
+                </Box>
+              ))}
+            </Box>
             <IconButton
               size="small"
               onClick={() => handlePageChange({} as React.ChangeEvent<unknown>, Math.min(totalPages, currentPage + 1))}
@@ -613,8 +669,8 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
               sx={{
                 p: 0.25,
                 minWidth: 'auto',
-                width: '18px',
-                height: '18px',
+                width: '20px',
+                height: '20px',
                 color: '#10b981',
                 '&:disabled': {
                   opacity: 0.3,
@@ -624,8 +680,11 @@ export const CachePerformance: React.FC<CachePerformanceProps> = ({ refreshKey =
                 },
               }}
             >
-              <ChevronRight sx={{ fontSize: '12px' }} />
+              <ChevronRight sx={{ fontSize: '14px' }} />
             </IconButton>
+            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem', ml: 1, fontWeight: 500 }}>
+              Page {currentPage} of {totalPages}
+            </Typography>
           </Box>
         )}
       </CardContent>

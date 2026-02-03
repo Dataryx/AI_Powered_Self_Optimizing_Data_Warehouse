@@ -1,11 +1,12 @@
 /**
- * Data Freshness Component
- * Displays data freshness indicators per layer with modern design
+ * Data Freshness & SLA Component
+ * Dataset-centric freshness cards with SLA lag and upstream dependencies
+ * Enterprise-grade minimal design
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Card, CardContent, Typography, Box, Chip, Grid, Tooltip, IconButton, LinearProgress } from '@mui/material';
-import { CheckCircle, Warning, Error as ErrorIcon, AccessTime, Refresh, FiberManualRecord } from '@mui/icons-material';
+import { Card, CardContent, Typography, Box, Chip, Grid, Tooltip, IconButton, Paper, Divider, Button } from '@mui/material';
+import { CheckCircle, Warning, Error as ErrorIcon, AccessTime, Refresh, ArrowUpward, Storage, TableChart, DataObject } from '@mui/icons-material';
 import { apiService } from '../../services/api';
 
 interface TableFreshness {
@@ -96,7 +97,18 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
   const layers = ['bronze', 'silver', 'gold'];
   const layerNames = { bronze: 'Bronze Layer', silver: 'Silver Layer', gold: 'Gold Layer' };
   const layerColors = { bronze: '#f59e0b', silver: '#6366f1', gold: '#10b981' };
-  const layerIcons = { bronze: '🟤', silver: '🔵', gold: '🟢' };
+  const getLayerIcon = (layer: string) => {
+    switch (layer) {
+      case 'bronze':
+        return <Storage sx={{ fontSize: 16, color: '#f59e0b' }} />;
+      case 'silver':
+        return <TableChart sx={{ fontSize: 16, color: '#6366f1' }} />;
+      case 'gold':
+        return <DataObject sx={{ fontSize: 16, color: '#10b981' }} />;
+      default:
+        return <Storage sx={{ fontSize: 16, color: '#64748b' }} />;
+    }
+  };
 
   const formatTimeAgo = (hoursAgo: number): string => {
     if (hoursAgo < 1) {
@@ -144,14 +156,11 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
 
   if (loading && totalTables === 0) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
-        <CardContent sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-            <LinearProgress sx={{ width: '100%', height: 6, borderRadius: 3 }} />
-            <Typography variant="body2" sx={{ color: 'text.secondary', minWidth: 'fit-content' }}>
-              Loading freshness data...
-            </Typography>
-          </Box>
+      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+        <CardContent sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+            Loading freshness data...
+          </Typography>
         </CardContent>
       </Card>
     );
@@ -176,284 +185,221 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
     );
   }
 
+  // Calculate SLA status
+  const getSLAStatus = (hoursAgo: number) => {
+    if (hoursAgo < 1) return { status: 'on-time', label: 'On time', color: '#10b981' };
+    if (hoursAgo < 24) return { status: 'at-risk', label: 'At risk', color: '#f59e0b' };
+    return { status: 'breach', label: 'SLA breach', color: '#ef4444' };
+  };
+
+  // Get all tables across layers for dataset-centric view
+  const allTables = layers.flatMap((layer) => {
+    const layerData = freshness[layer];
+    if (!layerData?.tables) return [];
+    return layerData.tables.map((table) => ({
+      ...table,
+      layer,
+      layerName: layerNames[layer as keyof typeof layerNames],
+    }));
+  });
+
+  const onTimeCount = allTables.filter((t) => getSLAStatus(t.hours_ago).status === 'on-time').length;
+  const atRiskCount = allTables.filter((t) => getSLAStatus(t.hours_ago).status === 'at-risk').length;
+  const breachCount = allTables.filter((t) => getSLAStatus(t.hours_ago).status === 'breach').length;
+
   return (
-    <Card
-      sx={{
-        background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-        border: '1px solid rgba(16, 185, 129, 0.1)',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.08)',
-      }}
-    >
-      <CardContent sx={{ p: 2.5 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+    <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+      <CardContent sx={{ p: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Box>
             <Typography
               variant="h6"
               sx={{
-                fontWeight: 700,
-                background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)',
-                backgroundClip: 'text',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                fontSize: '1.1rem',
+                fontWeight: 600,
+                color: '#0f172a',
+                fontSize: '1rem',
+                mb: 0.5,
               }}
             >
-              Data Freshness Indicators
+              Data Freshness & SLA
             </Typography>
-            {totalTables > 0 && (
-              <Chip
-                label={`${totalTables} tables`}
-                size="small"
-                sx={{
-                  backgroundColor: '#10b98120',
-                  color: '#10b981',
-                  fontWeight: 600,
-                  fontSize: '0.7rem',
-                  height: '20px',
-                }}
-              />
-            )}
-            {lastFetch && (
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Updated {formatTimeAgo((Date.now() - lastFetch.getTime()) / (1000 * 60 * 60))}
-              </Typography>
-            )}
+            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+              Dataset freshness with SLA compliance
+            </Typography>
           </Box>
-          <IconButton size="small" onClick={fetchFreshness} sx={{ color: '#10b981' }}>
-            <Refresh />
+          <IconButton
+            size="small"
+            onClick={fetchFreshness}
+            sx={{
+              color: '#6366f1',
+              '&:hover': { backgroundColor: '#f1f5f9' },
+            }}
+          >
+            <Refresh sx={{ fontSize: 18 }} />
           </IconButton>
         </Box>
 
-        {totalTables === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <AccessTime sx={{ color: '#64748b', fontSize: 48, mb: 2 }} />
-            <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', mb: 1 }}>
-              No Freshness Data Available
-            </Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              Run ETL jobs to see data freshness indicators
+        {/* SLA Summary */}
+        <Paper elevation={0} sx={{ p: 2, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 1.5, mb: 3 }}>
+          <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
+                On Time
+              </Typography>
+              <Typography variant="h6" sx={{ color: '#10b981', fontSize: '1.25rem', fontWeight: 600 }}>
+                {onTimeCount}
+              </Typography>
+            </Box>
+            <Divider orientation="vertical" flexItem sx={{ borderColor: '#e2e8f0' }} />
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
+                At Risk
+              </Typography>
+              <Typography variant="h6" sx={{ color: '#f59e0b', fontSize: '1.25rem', fontWeight: 600 }}>
+                {atRiskCount}
+              </Typography>
+            </Box>
+            <Divider orientation="vertical" flexItem sx={{ borderColor: '#e2e8f0' }} />
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
+                SLA Breach
+              </Typography>
+              <Typography variant="h6" sx={{ color: '#ef4444', fontSize: '1.25rem', fontWeight: 600 }}>
+                {breachCount}
+              </Typography>
+            </Box>
+            <Divider orientation="vertical" flexItem sx={{ borderColor: '#e2e8f0' }} />
+            <Box>
+              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
+                Total Datasets
+              </Typography>
+              <Typography variant="h6" sx={{ color: '#0f172a', fontSize: '1.25rem', fontWeight: 600 }}>
+                {allTables.length}
+              </Typography>
+            </Box>
+          </Box>
+        </Paper>
+
+        {allTables.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <AccessTime sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
+            <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+              No freshness data available
             </Typography>
           </Box>
         ) : (
-          <Grid container spacing={2}>
-            {layers.map((layer) => {
-              const layerData = freshness[layer];
-              // Show placeholder for missing layer data instead of returning null
-              if (!layerData || !layerData.tables || layerData.tables.length === 0) {
+          <>
+            <Grid container spacing={2}>
+              {allTables.slice(0, 6).map((table, index) => {
+                const slaStatus = getSLAStatus(table.hours_ago);
+                const tableStatusColors = getStatusColor(table.status);
+                const layerColor = layerColors[table.layer as keyof typeof layerColors];
+
                 return (
-                  <Box key={layer} sx={{ mb: 2 }}>
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
-                      {layer.toUpperCase()} Layer: No tables available
-                    </Typography>
-                  </Box>
-                );
-              }
-
-              const statusColors = getStatusColor(layerData.overall_status);
-              const layerColor = layerColors[layer as keyof typeof layerColors];
-              const layerTableCount = layerData.tables.length;
-
-              return (
-                <Grid item xs={12} md={4} key={layer}>
-                  <Card
-                    sx={{
-                      p: 2.5,
-                      background: `linear-gradient(135deg, ${layerColor}08 0%, rgba(255,255,255,0.95) 100%)`,
-                      border: `2px solid ${layerColor}30`,
-                      borderRadius: 2.5,
-                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                      position: 'relative',
-                      overflow: 'hidden',
-                      '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: '4px',
-                        background: `linear-gradient(90deg, ${layerColor} 0%, ${layerColor}80 100%)`,
-                      },
-                      '&:hover': {
-                        transform: 'translateY(-4px)',
-                        boxShadow: `0 12px 24px ${layerColor}40`,
-                        borderColor: layerColor,
-                      },
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box
-                          sx={{
-                            width: 40,
-                            height: 40,
-                            borderRadius: '50%',
-                            background: `linear-gradient(135deg, ${layerColor} 0%, ${layerColor}80 100%)`,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'white',
-                            fontWeight: 700,
-                            fontSize: '1.2rem',
-                          }}
-                        >
-                          {layerIcons[layer as keyof typeof layerIcons]}
-                        </Box>
-                        <Box>
-                          <Typography variant="body1" sx={{ fontWeight: 700, color: layerColor, fontSize: '0.95rem' }}>
-                            {layerNames[layer as keyof typeof layerNames]}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                            {layerTableCount} {layerTableCount === 1 ? 'table' : 'tables'}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        {getStatusIcon(layerData.overall_status)}
-                        <Chip
-                          label={layerData.overall_status}
-                          size="small"
-                          sx={{
-                            backgroundColor: statusColors.bg,
-                            color: statusColors.color,
-                            fontWeight: 600,
-                            fontSize: '0.7rem',
-                            height: '22px',
-                            border: `1px solid ${statusColors.border}`,
-                          }}
-                        />
-                      </Box>
-                    </Box>
-
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                      {layerData.tables.slice(0, 6).map((table) => {
-                        const tableStatusColors = getStatusColor(table.status);
-                        return (
-                          <Tooltip
-                            key={table.table}
-                            title={
-                              <Box sx={{ p: 0.5 }}>
-                                <Typography variant="caption" sx={{ display: 'block', fontWeight: 600, mb: 0.5 }}>
-                                  {table.table}
-                                </Typography>
-                                <Typography variant="caption" sx={{ display: 'block', opacity: 0.9 }}>
-                                  Last Updated: {table.last_updated ? new Date(table.last_updated).toLocaleString() : 'Never'}
-                                </Typography>
-                                <Typography variant="caption" sx={{ display: 'block', opacity: 0.9 }}>
-                                  Records: {table.total_records.toLocaleString()}
-                                </Typography>
-                                <Typography variant="caption" sx={{ display: 'block', opacity: 0.9 }}>
-                                  Age: {formatTimeAgo(table.hours_ago)}
-                                </Typography>
-                              </Box>
-                            }
-                            arrow
-                          >
-                            <Box
+                  <Grid item xs={12} sm={6} md={4} key={`${table.layer}-${table.table}-${index}`}>
+                    <Paper
+                      elevation={0}
+                      sx={{
+                        p: 2,
+                        background: '#ffffff',
+                        border: `1px solid ${slaStatus.color}30`,
+                        borderRadius: 1.5,
+                        transition: 'all 0.2s ease',
+                        cursor: 'pointer',
+                        '&:hover': {
+                          borderColor: slaStatus.color,
+                          boxShadow: `0 2px 8px ${slaStatus.color}20`,
+                        },
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5 }}>
+                            {getLayerIcon(table.layer)}
+                            <Typography
+                              variant="body2"
                               sx={{
-                                p: 1.5,
-                                borderRadius: 2,
-                                background: `linear-gradient(135deg, ${tableStatusColors.color}08 0%, ${tableStatusColors.color}05 100%)`,
-                                border: `1.5px solid ${tableStatusColors.border}`,
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                                cursor: 'pointer',
-                                position: 'relative',
-                                '&:hover': {
-                                  backgroundColor: `${tableStatusColors.color}15`,
-                                  transform: 'translateX(6px)',
-                                  borderColor: tableStatusColors.color,
-                                  boxShadow: `0 4px 12px ${tableStatusColors.color}30`,
-                                },
+                                fontWeight: 600,
+                                color: '#0f172a',
+                                fontSize: '0.875rem',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                flex: 1,
                               }}
                             >
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flex: 1, minWidth: 0 }}>
-                                <Box
-                                  sx={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    minWidth: 24,
-                                  }}
-                                >
-                                  {getStatusIcon(table.status)}
-                                </Box>
-                                <Box sx={{ flex: 1, minWidth: 0 }}>
-                                  <Typography
-                                    variant="body2"
-                                    sx={{
-                                      fontWeight: 600,
-                                      fontSize: '0.85rem',
-                                      color: 'text.primary',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap',
-                                      mb: 0.25,
-                                    }}
-                                  >
-                                    {table.table}
-                                  </Typography>
-                                  {table.total_records > 0 && (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                      <FiberManualRecord sx={{ fontSize: 6, color: tableStatusColors.color }} />
-                                      <Typography
-                                        variant="caption"
-                                        sx={{
-                                          color: 'text.secondary',
-                                          fontSize: '0.7rem',
-                                          fontWeight: 500,
-                                        }}
-                                      >
-                                        {table.total_records.toLocaleString()} records
-                                      </Typography>
-                                    </Box>
-                                  )}
-                                </Box>
-                              </Box>
-                              <Box
-                                sx={{
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  alignItems: 'flex-end',
-                                  gap: 0.25,
-                                  ml: 1,
-                                }}
-                              >
-                                <Typography
-                                  variant="caption"
-                                  sx={{
-                                    color: tableStatusColors.color,
-                                    fontWeight: 700,
-                                    fontSize: '0.75rem',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  {formatTimeAgo(table.hours_ago)}
-                                </Typography>
-                                <Chip
-                                  label={table.status}
-                                  size="small"
-                                  sx={{
-                                    backgroundColor: tableStatusColors.bg,
-                                    color: tableStatusColors.color,
-                                    fontWeight: 600,
-                                    fontSize: '0.65rem',
-                                    height: '18px',
-                                    border: `1px solid ${tableStatusColors.border}`,
-                                  }}
-                                />
-                              </Box>
-                            </Box>
-                          </Tooltip>
-                        );
-                      })}
-                    </Box>
-                  </Card>
-                </Grid>
-              );
-            })}
-          </Grid>
+                              {table.table}
+                            </Typography>
+                          </Box>
+                        </Box>
+                        {getStatusIcon(table.status)}
+                      </Box>
+
+                      <Divider sx={{ my: 1.5, borderColor: '#e2e8f0' }} />
+
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', minWidth: '80px' }}>
+                            SLA Lag
+                          </Typography>
+                          <Chip
+                            label={slaStatus.label}
+                            size="small"
+                            sx={{
+                              backgroundColor: slaStatus.color + '15',
+                              color: slaStatus.color,
+                              fontWeight: 600,
+                              fontSize: '0.6875rem',
+                              height: '20px',
+                              border: `1px solid ${slaStatus.color}30`,
+                            }}
+                          />
+                        </Box>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', minWidth: '80px' }}>
+                            Last Updated
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: '#0f172a', fontSize: '0.75rem', fontWeight: 500 }}>
+                            {formatTimeAgo(table.hours_ago)}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', minWidth: '80px' }}>
+                            Records
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: '#0f172a', fontSize: '0.75rem', fontWeight: 500 }}>
+                            {table.total_records.toLocaleString()}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Paper>
+                  </Grid>
+                );
+              })}
+            </Grid>
+            {allTables.length > 6 && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  sx={{
+                    color: '#6366f1',
+                    borderColor: '#6366f1',
+                    fontSize: '0.8125rem',
+                    fontWeight: 500,
+                    textTransform: 'none',
+                    px: 3,
+                    '&:hover': {
+                      borderColor: '#6366f1',
+                      backgroundColor: '#6366f115',
+                    },
+                  }}
+                >
+                  View all ({allTables.length} datasets)
+                </Button>
+              </Box>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

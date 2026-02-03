@@ -3,7 +3,7 @@
  * Root component with routing and layout.
  */
 
-import React from 'react'; // eslint-disable-line @typescript-eslint/no-unused-vars
+import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import { Provider } from 'react-redux';
@@ -136,6 +136,19 @@ const theme = createTheme({
 });
 
 function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    const saved = localStorage.getItem('sidebarOpen');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const handleSidebarToggle = () => {
+    setSidebarOpen(prev => {
+      const newState = !prev;
+      localStorage.setItem('sidebarOpen', String(newState));
+      return newState;
+    });
+  };
+
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
@@ -144,18 +157,19 @@ function App() {
             <CssBaseline />
             <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-                <Header />
-                <Sidebar />
+                <Header sidebarOpen={sidebarOpen} onSidebarToggle={handleSidebarToggle} />
+                <Sidebar open={sidebarOpen} onToggle={handleSidebarToggle} />
                 <Box
                   component="main"
                   sx={{
                     flexGrow: 1,
                     p: 0,
                     mt: 8,
-                    ml: { sm: '70px' },
+                    ml: sidebarOpen ? '280px' : '72px',
                     background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
                     minHeight: 'calc(100vh - 64px)',
                     position: 'relative',
+                    transition: 'margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                     '&::before': {
                       content: '""',
                       position: 'absolute',

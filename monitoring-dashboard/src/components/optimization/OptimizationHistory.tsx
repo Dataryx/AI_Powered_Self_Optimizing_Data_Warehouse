@@ -1,66 +1,54 @@
 /**
  * Optimization History Component
- * Displays optimization application history
+ * Timeline-style history of applied optimizations - Designed for auditability
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { 
-  Card, 
-  CardContent, 
-  Typography, 
-  Box, 
+import {
+  Card,
+  CardContent,
+  Typography,
+  Box,
   Chip,
-  IconButton,
-  Tooltip,
-  Pagination,
+  Paper,
+  Divider,
 } from '@mui/material';
-import { Refresh, History, CheckCircle, Error as ErrorIcon, Schedule, FiberManualRecord } from '@mui/icons-material';
-import { keyframes } from '@mui/material/styles';
+import { History, CheckCircle, Person } from '@mui/icons-material';
 import { apiService } from '../../services/api';
 
 interface HistoryItem {
   recommendation_id: string;
   type: string;
   table: string;
-  columns: string[];
-  priority: string;
+  schema?: string;
+  columns?: string[];
+  priority?: string;
+  severity?: string;
   created_at: string;
-  query_count?: number;
-  avg_execution_time_ms?: number;
-  sql_statement?: string;
+  applied_at?: string;
+  applied_by?: string;
+  affected_queries?: number;
+  status?: string;
 }
 
 interface OptimizationHistoryProps {
   refreshKey?: number;
 }
 
-const slideIn = keyframes`
-  from {
-    opacity: 0;
-    transform: translateX(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-`;
-
-const ITEMS_PER_PAGE = 8;
-
-export const OptimizationHistory: React.FC<OptimizationHistoryProps> = ({ refreshKey = 0 }) => {
+export const OptimizationHistory: React.FC<OptimizationHistoryProps> = ({
+  refreshKey = 0,
+}) => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const [currentPage, setCurrentPage] = useState(1);
 
   const fetchHistory = useCallback(async () => {
     try {
       const data = await apiService.getOptimizationHistory(100);
-      setHistory(data.history || []);
-      setLastUpdate(new Date());
+      setHistory(data.history || data.data?.history || []);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching optimization history:', err);
+      setHistory([]);
       setLoading(false);
     }
   }, []);
@@ -71,292 +59,290 @@ export const OptimizationHistory: React.FC<OptimizationHistoryProps> = ({ refres
     return () => clearInterval(interval);
   }, [fetchHistory, refreshKey]);
 
-  const totalPages = Math.ceil(history.length / ITEMS_PER_PAGE);
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const endIndex = startIndex + ITEMS_PER_PAGE;
-  const currentHistory = history.slice(startIndex, endIndex);
-
   const getTypeColor = (type: string) => {
     switch (type?.toLowerCase()) {
       case 'index':
-        return '#6366f1';
+        return { bg: '#6366f1', light: '#e0e7ff', text: '#4338ca' };
       case 'partition':
-        return '#8b5cf6';
+        return { bg: '#10b981', light: '#d1fae5', text: '#059669' };
       case 'cache':
-        return '#ec4899';
+        return { bg: '#f59e0b', light: '#fef3c7', text: '#92400e' };
       default:
-        return '#64748b';
+        return { bg: '#64748b', light: '#f1f5f9', text: '#475569' };
     }
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority?.toLowerCase()) {
+  const getSeverityColor = (severity?: string) => {
+    switch (severity?.toLowerCase()) {
       case 'high':
-        return '#ef4444';
+        return { bg: '#ef4444', light: '#fef2f2', text: '#991b1b' };
       case 'medium':
-        return '#f59e0b';
+        return { bg: '#f59e0b', light: '#fef3c7', text: '#92400e' };
       case 'low':
-        return '#3b82f6';
+        return { bg: '#6366f1', light: '#e0e7ff', text: '#4338ca' };
       default:
-        return '#64748b';
+        return { bg: '#64748b', light: '#f1f5f9', text: '#475569' };
     }
   };
 
-  if (loading && history.length === 0) {
+  const formatTimestamp = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  const getNoActionTaken = (item: HistoryItem) => {
+    const status = (item.status || '').toLowerCase();
+    // Treat common non-applied outcomes as “no action taken”
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)' }}>
-        <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography>Loading optimization history...</Typography>
-        </CardContent>
-      </Card>
+      status.includes('rejected') ||
+      status.includes('dismissed') ||
+      status.includes('no_action') ||
+      status.includes('no action') ||
+      status.includes('reviewed') ||
+      status.includes('skipped')
     );
-  }
+  };
 
   return (
     <Card
+      elevation={0}
       sx={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(16, 185, 129, 0.2)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-        height: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-        maxHeight: '600px',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: '4px',
-          background: 'linear-gradient(90deg, #10b981 0%, #3b82f6 50%, #6366f1 100%)',
-        },
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 2,
       }}
     >
-      <CardContent sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box
+      <CardContent sx={{ p: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
+          <Box
+            sx={{
+              p: 1,
+              borderRadius: 1.5,
+              background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <History sx={{ color: 'white', fontSize: 20 }} />
+          </Box>
+          <Box sx={{ flex: 1 }}>
+            <Typography
+              variant="h6"
               sx={{
-                p: 0.75,
-                borderRadius: 1.5,
-                background: 'linear-gradient(135deg, #10b981 0%, #3b82f6 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                fontWeight: 600,
+                color: '#0f172a',
+                fontSize: '1rem',
+                mb: 0.25,
               }}
             >
-              <History sx={{ fontSize: 18, color: 'white' }} />
-            </Box>
-            <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Optimization History
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Applied optimizations timeline
-              </Typography>
-            </Box>
+              Optimization History
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{ color: '#64748b', fontSize: '0.75rem' }}
+            >
+              Applied optimizations timeline
+            </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {history.length > 0 && (
             <Chip
               label={history.length}
               size="small"
               sx={{
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                color: '#10b981',
+                backgroundColor: '#f1f5f9',
+                color: '#475569',
                 fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
+                fontSize: '0.75rem',
+                height: '24px',
               }}
             />
-            <IconButton
-              onClick={fetchHistory}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                color: '#10b981',
-                '&:hover': {
-                  backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                  transform: 'rotate(180deg)',
-                },
-                transition: 'all 0.3s',
-                width: 28,
-                height: 28,
-              }}
-            >
-              <Refresh sx={{ fontSize: 14 }} />
-            </IconButton>
-          </Box>
+          )}
         </Box>
 
-        {/* History Timeline */}
-        {history.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Box>
-              <Schedule sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.5, mb: 1 }} />
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                No optimization history available
-              </Typography>
-            </Box>
+        {loading ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <Typography variant="body2" sx={{ color: '#64748b' }}>
+              Loading optimization history...
+            </Typography>
+          </Box>
+        ) : history.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <History sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
+            <Typography
+              variant="body2"
+              sx={{ color: '#64748b', fontSize: '0.875rem' }}
+            >
+              No optimization history available
+            </Typography>
           </Box>
         ) : (
-          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <Box
-              sx={{
-                flex: 1,
-                overflowY: 'auto',
-                pb: 0.5,
-                '&::-webkit-scrollbar': {
-                  width: '6px',
-                },
-                '&::-webkit-scrollbar-track': {
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  borderRadius: '3px',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  background: 'rgba(16, 185, 129, 0.3)',
-                  borderRadius: '3px',
-                  '&:hover': {
-                    background: 'rgba(16, 185, 129, 0.5)',
-                  },
-                },
-              }}
-            >
-              <Box sx={{ position: 'relative', pl: 2 }}>
-                {/* Timeline line */}
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    left: 6,
-                    top: 0,
-                    bottom: 0,
-                    width: '2px',
-                    background: 'linear-gradient(to bottom, rgba(16, 185, 129, 0.3), rgba(16, 185, 129, 0.1))',
-                  }}
-                />
-                {currentHistory.map((item, index) => {
-                  const typeColor = getTypeColor(item.type);
-                  const priorityColor = getPriorityColor(item.priority);
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {history.map((item, index) => {
+              const typeColors = getTypeColor(item.type);
+              const severityColors = getSeverityColor(item.severity || item.priority);
+              const target = item.schema ? `${item.schema}.${item.table}` : item.table;
+              const noActionTaken = getNoActionTaken(item);
 
-                  return (
-                    <Box
-                      key={item.recommendation_id}
-                      sx={{
-                        position: 'relative',
-                        mb: 2,
-                        animation: `${slideIn} 0.3s ease-out`,
-                        animationDelay: `${index * 0.05}s`,
-                      }}
-                    >
-                      {/* Timeline dot */}
-                      <Box
-                        sx={{
-                          position: 'absolute',
-                          left: -18,
-                          top: 8,
-                          width: 12,
-                          height: 12,
-                          borderRadius: '50%',
-                          backgroundColor: typeColor,
-                          border: `2px solid white`,
-                          boxShadow: `0 0 0 2px ${typeColor}`,
-                          zIndex: 1,
-                        }}
-                      />
-                      {/* Content */}
-                      <Box
-                        sx={{
-                          p: 1,
-                          borderRadius: 1.5,
-                          border: `1px solid ${typeColor}40`,
-                          background: `${typeColor}10`,
-                          ml: 0.5,
-                        }}
-                      >
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
-                              {item.table}
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                              {item.type} • {item.columns.join(', ')}
-                            </Typography>
-                          </Box>
+              return (
+                <React.Fragment key={item.recommendation_id || index}>
+                  <Paper
+                    elevation={0}
+                    sx={{
+                      p: 2.5,
+                      background: '#ffffff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 1.5,
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        borderColor: typeColors.bg,
+                        boxShadow: `0 2px 8px ${typeColors.light}`,
+                      },
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: 600,
+                            color: '#0f172a',
+                            fontSize: '0.875rem',
+                            mb: 0.75,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                          title={target}
+                        >
+                          {target}
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 1 }}>
                           <Chip
-                            label={item.priority}
+                            label={item.type}
                             size="small"
                             sx={{
-                              height: '16px',
-                              fontSize: '0.65rem',
-                              backgroundColor: priorityColor,
-                              color: 'white',
+                              height: '20px',
+                              fontSize: '0.6875rem',
+                              backgroundColor: typeColors.light,
+                              color: typeColors.text,
                               fontWeight: 600,
+                              textTransform: 'capitalize',
                             }}
                           />
+                          {(item.severity || item.priority) && (
+                            <Chip
+                              label={item.severity || item.priority}
+                              size="small"
+                              sx={{
+                                height: '20px',
+                                fontSize: '0.6875rem',
+                                backgroundColor: severityColors.light,
+                                color: severityColors.text,
+                                fontWeight: 600,
+                                textTransform: 'capitalize',
+                              }}
+                            />
+                          )}
+                          {noActionTaken && (
+                            <Chip
+                              label="Reviewed — no action taken"
+                              size="small"
+                              sx={{
+                                height: '20px',
+                                fontSize: '0.6875rem',
+                                backgroundColor: '#f1f5f9',
+                                color: '#475569',
+                                fontWeight: 600,
+                              }}
+                            />
+                          )}
                         </Box>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
-                          {new Date(item.created_at).toLocaleString()}
-                          {item.query_count && ` • ${item.query_count} queries`}
+                      </Box>
+                      <CheckCircle
+                        sx={{
+                          fontSize: 18,
+                          color: noActionTaken ? '#94a3b8' : '#10b981',
+                          ml: 1,
+                        }}
+                      />
+                    </Box>
+
+                    <Divider sx={{ my: 1.5, borderColor: '#e2e8f0' }} />
+
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                          Applied At
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 500, color: '#0f172a', fontSize: '0.8125rem' }}>
+                          {formatTimestamp(item.applied_at || item.created_at)}
                         </Typography>
                       </Box>
+                      {item.affected_queries !== undefined && (
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                            Affected Queries
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.8125rem' }}>
+                            {item.affected_queries.toLocaleString()}
+                          </Typography>
+                        </Box>
+                      )}
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                          Applied By
+                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Person sx={{ fontSize: 14, color: '#64748b' }} />
+                          <Typography variant="body2" sx={{ fontWeight: 500, color: '#0f172a', fontSize: '0.8125rem' }}>
+                            {noActionTaken
+                              ? 'Recommendation reviewed — no action taken'
+                              : (item.applied_by || 'ML Engine – Advisory approved')}
+                          </Typography>
+                        </Box>
+                      </Box>
+                      {item.columns && item.columns.length > 0 && (
+                        <Box>
+                          <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mb: 0.5, fontSize: '0.75rem' }}>
+                            Columns
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                            {item.columns.map((col, idx) => (
+                              <Chip
+                                key={idx}
+                                label={col}
+                                size="small"
+                                sx={{
+                                  height: '18px',
+                                  fontSize: '0.625rem',
+                                  backgroundColor: '#f1f5f9',
+                                  color: '#475569',
+                                  fontWeight: 500,
+                                }}
+                              />
+                            ))}
+                          </Box>
+                        </Box>
+                      )}
                     </Box>
-                  );
-                })}
-              </Box>
-            </Box>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <Box
-                sx={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  p: 1,
-                  background: 'linear-gradient(to top, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.8) 100%)',
-                  backdropFilter: 'blur(10px)',
-                  borderTop: '1px solid rgba(16, 185, 129, 0.1)',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                }}
-              >
-                <Pagination
-                  count={totalPages}
-                  page={currentPage}
-                  onChange={(e, value) => setCurrentPage(value)}
-                  size="small"
-                  siblingCount={0}
-                  boundaryCount={1}
-                  renderItem={(item) => (
-                    <Box
-                      sx={{
-                        ...(item.type === 'page' && {
-                          '& .MuiPaginationItem-root': {
-                            minWidth: '28px',
-                            height: '28px',
-                            fontSize: '0.75rem',
-                            color: item.selected ? 'white' : '#10b981',
-                            backgroundColor: item.selected ? '#10b981' : 'transparent',
-                            '&:hover': {
-                              backgroundColor: item.selected ? '#059669' : 'rgba(16, 185, 129, 0.1)',
-                            },
-                          },
-                        }),
-                      }}
-                      {...item}
-                    />
-                  )}
-                />
-              </Box>
-            )}
+                  </Paper>
+                  {index < history.length - 1 && <Divider sx={{ borderColor: '#e2e8f0' }} />}
+                </React.Fragment>
+              );
+            })}
           </Box>
         )}
       </CardContent>
     </Card>
   );
 };
-

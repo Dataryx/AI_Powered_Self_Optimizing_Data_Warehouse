@@ -1,11 +1,12 @@
 /**
- * Pipeline DAG Visualization Component
- * Visual representation of ETL pipeline with modern design
+ * ETL Lineage Visualization Component
+ * Enterprise-grade horizontal swimlane visualization
+ * Clean DAG nodes with status indicators and hover tooltips
  */
 
 import React, { useEffect, useState } from 'react';
-import { Card, CardContent, Typography, Box, Grid, Paper, Chip } from '@mui/material';
-import { ArrowForward, DataObject, Storage, TableChart, Transform } from '@mui/icons-material';
+import { Card, CardContent, Typography, Box, Paper, Chip, Tooltip } from '@mui/material';
+import { ArrowForward, DataObject, Storage, TableChart, Transform, CheckCircle, Warning, Error as ErrorIcon } from '@mui/icons-material';
 import { apiService } from '../../services/api';
 
 interface DAGNode {
@@ -24,21 +25,37 @@ interface PipelineDAGProps {
   refreshKey?: number;
 }
 
+interface ETLJob {
+  job_id: string;
+  job_name: string;
+  status: string;
+  started_at: string;
+  completed_at?: string;
+  records_processed: number;
+  layer: string;
+  table: string;
+}
+
 export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
   const [nodes, setNodes] = useState<DAGNode[]>([]);
   const [edges, setEdges] = useState<DAGEdge[]>([]);
+  const [etlJobs, setEtlJobs] = useState<ETLJob[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchDAG();
+    fetchETLJobs();
     // DAG structure doesn't change frequently, refresh every 60 seconds
-    const interval = setInterval(fetchDAG, 60000);
+    const interval = setInterval(() => {
+      fetchDAG();
+      fetchETLJobs();
+    }, 60000);
     return () => clearInterval(interval);
   }, [refreshKey]); // Re-run when refreshKey changes
 
   const fetchDAG = async () => {
     try {
-      const data = await apiService.getPipelineDAG();
+      const data = await apiService.getPipelineDAG() as any;
       setNodes(data.nodes || []);
       setEdges(data.edges || []);
       setLoading(false);
@@ -48,47 +65,185 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
     }
   };
 
+  const fetchETLJobs = async () => {
+    try {
+      const data = await apiService.getETLJobs() as any;
+      setEtlJobs(data.jobs || []);
+    } catch (err) {
+      console.error('Error fetching ETL jobs for DAG:', err);
+    }
+  };
+
   const getNodeIcon = (type: string) => {
     switch (type) {
       case 'source':
-        return <Storage sx={{ fontSize: 24 }} />;
+        return <Storage sx={{ fontSize: 18 }} />;
       case 'transform':
-        return <Transform sx={{ fontSize: 24 }} />;
+        return <Transform sx={{ fontSize: 18 }} />;
       case 'aggregate':
-        return <DataObject sx={{ fontSize: 24 }} />;
+        return <DataObject sx={{ fontSize: 18 }} />;
       case 'table':
-        return <TableChart sx={{ fontSize: 24 }} />;
+        return <TableChart sx={{ fontSize: 18 }} />;
       default:
-        return <Storage sx={{ fontSize: 24 }} />;
+        return <Storage sx={{ fontSize: 18 }} />;
     }
   };
 
   const getLayerColor = (layer: string) => {
     switch (layer) {
       case 'bronze':
-        return { bg: '#f59e0b', light: '#fef3c7', text: '#92400e' };
+        return { bg: '#fef3c7', border: '#f59e0b', text: '#92400e', accent: '#f59e0b' };
       case 'silver':
-        return { bg: '#6366f1', light: '#e0e7ff', text: '#312e81' };
+        return { bg: '#e0e7ff', border: '#6366f1', text: '#312e81', accent: '#6366f1' };
       case 'gold':
-        return { bg: '#10b981', light: '#d1fae5', text: '#065f46' };
+        return { bg: '#d1fae5', border: '#10b981', text: '#065f46', accent: '#10b981' };
       default:
-        return { bg: '#64748b', light: '#f1f5f9', text: '#334155' };
+        return { bg: '#f1f5f9', border: '#64748b', text: '#334155', accent: '#64748b' };
     }
   };
 
-  const getNodeTypeColor = (type: string) => {
-    switch (type) {
-      case 'source':
-        return '#6366f1';
-      case 'transform':
-        return '#8b5cf6';
-      case 'aggregate':
-        return '#ec4899';
-      case 'table':
-        return '#64748b';
-      default:
-        return '#64748b';
+  const getNodeStatus = (node: DAGNode): string => {
+    // Find matching ETL jobs for this node
+    const nodeJobs = etlJobs.filter((job: ETLJob) => {
+      const jobName = job.job_name?.toLowerCase() || '';
+      const nodeLabel = node.label?.toLowerCase() || '';
+      return jobName.includes(nodeLabel) || nodeLabel.includes(jobName) || 
+             (job.table && nodeLabel.includes(job.table.toLowerCase()));
+    });
+
+    if (nodeJobs.length === 0) {
+      return 'healthy'; // Default to healthy if no jobs found
     }
+
+    // Get the most recent job
+    const recentJob = nodeJobs.sort((a, b) => {
+      const timeA = new Date(a.started_at).getTime();
+      const timeB = new Date(b.started_at).getTime();
+      return timeB - timeA;
+    })[0];
+
+    // Determine status based on job status and duration
+    if (recentJob.status === 'failed' || recentJob.status === 'error') {
+      return 'failed';
+    }
+
+    if (recentJob.status === 'slow') {
+      return 'slow';
+    }
+
+    // Check if duration is unusually long (anomaly detection)
+    if (recentJob.completed_at && recentJob.started_at) {
+      const duration = (new Date(recentJob.completed_at).getTime() - new Date(recentJob.started_at).getTime()) / 1000;
+      const avgDuration = nodeJobs
+        .filter(j => j.completed_at && j.started_at)
+        .map(j => (new Date(j.completed_at!).getTime() - new Date(j.started_at).getTime()) / 1000)
+        .reduce((a, b, _, arr) => a + b / arr.length, 0);
+      
+      if (duration > avgDuration * 1.5 && avgDuration > 0) {
+        return 'anomaly';
+      }
+    }
+
+    return recentJob.status === 'completed' ? 'healthy' : 'healthy';
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'healthy':
+        return '#10b981';
+      case 'slow':
+        return '#f59e0b';
+      case 'failed':
+        return '#ef4444';
+      case 'anomaly':
+        return '#dc2626';
+      default:
+        return '#10b981';
+    }
+  };
+
+  const getStatusDot = (status: string) => {
+    const color = getStatusColor(status);
+    return (
+      <Box
+        sx={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          backgroundColor: color,
+          boxShadow: `0 0 0 2px ${color}20`,
+        }}
+      />
+    );
+  };
+
+  // Get real metrics from ETL jobs for hover tooltip
+  const getNodeMetrics = (node: DAGNode) => {
+    // Find matching ETL jobs for this node
+    const nodeJobs = etlJobs.filter((job: ETLJob) => {
+      const jobName = job.job_name?.toLowerCase() || '';
+      const nodeLabel = node.label?.toLowerCase() || '';
+      return jobName.includes(nodeLabel) || nodeLabel.includes(jobName) || 
+             (job.table && nodeLabel.includes(job.table.toLowerCase()));
+    });
+
+    if (nodeJobs.length === 0) {
+      return {
+        lastRunDuration: null,
+        medianDuration: null,
+        rowsProcessed: 0,
+      };
+    }
+
+    // Calculate durations from completed jobs
+    const completedJobs = nodeJobs.filter((job: ETLJob) => 
+      job.completed_at && job.started_at
+    );
+
+    if (completedJobs.length === 0) {
+      return {
+        lastRunDuration: null,
+        medianDuration: null,
+        rowsProcessed: nodeJobs.reduce((sum, job) => sum + (job.records_processed || 0), 0),
+      };
+    }
+
+    const durations = completedJobs.map((job: ETLJob) => {
+      const start = new Date(job.started_at).getTime();
+      const end = new Date(job.completed_at!).getTime();
+      return Math.round((end - start) / 1000);
+    });
+
+    // Get last run duration (most recent job)
+    const sortedByTime = [...completedJobs].sort((a, b) => {
+      const timeA = new Date(a.completed_at!).getTime();
+      const timeB = new Date(b.completed_at!).getTime();
+      return timeB - timeA;
+    });
+    const lastRunDuration = sortedByTime.length > 0 ? 
+      Math.round((new Date(sortedByTime[0].completed_at!).getTime() - new Date(sortedByTime[0].started_at).getTime()) / 1000) : null;
+
+    // Calculate median duration
+    const sortedDurations = [...durations].sort((a, b) => a - b);
+    const medianDuration = sortedDurations.length > 0 ? 
+      sortedDurations[Math.floor(sortedDurations.length / 2)] : null;
+
+    // Sum rows processed
+    const rowsProcessed = nodeJobs.reduce((sum, job) => sum + (job.records_processed || 0), 0);
+
+    return {
+      lastRunDuration,
+      medianDuration,
+      rowsProcessed,
+    };
+  };
+
+  const formatDuration = (seconds: number | null) => {
+    if (seconds === null || seconds === undefined) return '—';
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`;
   };
 
   // Organize nodes by layer
@@ -100,145 +255,157 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
 
   if (loading) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)' }}>
+      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography>Loading pipeline DAG...</Typography>
+          <Typography variant="body2" sx={{ color: '#64748b' }}>Loading pipeline lineage...</Typography>
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card
-      sx={{
-        background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-        border: '1px solid rgba(99, 102, 241, 0.1)',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.08)',
-      }}
-    >
-      <CardContent sx={{ p: 2.5 }}>
+    <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+      <CardContent sx={{ p: 3 }}>
         <Typography
           variant="h6"
           sx={{
-            fontWeight: 700,
-            mb: 2.5,
-            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-            backgroundClip: 'text',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            fontSize: '1.1rem',
+            fontWeight: 600,
+            color: '#0f172a',
+            fontSize: '1rem',
+            mb: 3,
           }}
         >
-          Pipeline DAG Visualization
+          ETL Lineage Visualization
         </Typography>
 
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, position: 'relative' }}>
+        {/* Horizontal Swimlanes */}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {(['bronze', 'silver', 'gold'] as const).map((layer, layerIndex) => {
             const layerColor = getLayerColor(layer);
             const layerNodes = layerGroups[layer];
 
-            // Show placeholder for empty layers instead of returning null
-            if (layerNodes.length === 0) {
-              return (
-                <Grid item xs={12} md={4} key={layer}>
-                  <Paper
-                    sx={{
-                      p: 2,
-                      textAlign: 'center',
-                      background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
-                      border: `1px solid ${layerColors.bg}30`,
-                    }}
-                  >
-                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                      {layer.toUpperCase()} Layer: No nodes available
-                    </Typography>
-                  </Paper>
-                </Grid>
-              );
-            }
-
             return (
               <Box key={layer}>
+                {/* Layer Header */}
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                   <Chip
-                    label={layer.toUpperCase()}
+                    label={layer.charAt(0).toUpperCase() + layer.slice(1)}
+                    size="small"
                     sx={{
                       backgroundColor: layerColor.bg,
-                      color: 'white',
-                      fontWeight: 700,
+                      color: layerColor.text,
+                      fontWeight: 600,
                       fontSize: '0.75rem',
-                      height: '28px',
+                      height: '24px',
+                      minWidth: '80px',
                       mr: 2,
+                      border: `1px solid ${layerColor.border}`,
                     }}
                   />
                   <Box
                     sx={{
                       flex: 1,
-                      height: '2px',
-                      background: `linear-gradient(90deg, ${layerColor.bg} 0%, transparent 100%)`,
+                      height: '1px',
+                      background: layerColor.border,
+                      opacity: 0.3,
                     }}
                   />
                   {layerIndex < 2 && (
-                    <Box
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 40,
-                        height: 40,
-                        borderRadius: '50%',
-                        background: `linear-gradient(135deg, ${layerColor.bg} 0%, ${layerColor.bg}80 100%)`,
-                        color: 'white',
-                        ml: 2,
-                      }}
-                    >
-                      <ArrowForward />
-                    </Box>
+                    <ArrowForward sx={{ fontSize: 20, color: layerColor.accent, ml: 2, opacity: 0.6 }} />
                   )}
                 </Box>
 
-                <Grid container spacing={2}>
-                  {layerNodes.map((node) => {
-                    const typeColor = getNodeTypeColor(node.type);
-                    return (
-                      <Grid item xs={6} sm={4} md={3} key={node.id}>
-                        <Paper
-                          sx={{
-                            p: 2,
-                            borderRadius: 2,
-                            background: `linear-gradient(135deg, ${typeColor}10 0%, rgba(255,255,255,0.9) 100%)`,
-                            border: `2px solid ${typeColor}40`,
-                            transition: 'all 0.3s',
-                            position: 'relative',
-                            '&:hover': {
-                              transform: 'translateY(-4px) scale(1.02)',
-                              boxShadow: `0 8px 20px ${typeColor}40`,
-                              borderColor: typeColor,
-                            },
-                          }}
+                {/* Nodes in Horizontal Flow */}
+                {layerNodes.length === 0 ? (
+                  <Box sx={{ p: 2, textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
+                    No pipelines in {layer} layer
+                  </Box>
+                ) : (
+                  <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                    {layerNodes.map((node) => {
+                      const status = getNodeStatus(node);
+                      const metrics = getNodeMetrics(node);
+                      return (
+                        <Tooltip
+                          key={node.id}
+                          title={
+                            <Box sx={{ p: 1 }}>
+                              <Typography variant="caption" sx={{ display: 'block', fontWeight: 600, mb: 1, fontSize: '0.8125rem' }}>
+                                {node.label}
+                              </Typography>
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                                <Box>
+                                  <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', opacity: 0.8, mb: 0.25 }}>
+                                    Last run duration
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ display: 'block', fontSize: '0.75rem', fontWeight: 500 }}>
+                                    {formatDuration(metrics.lastRunDuration)}
+                                  </Typography>
+                                </Box>
+                                <Box>
+                                  <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', opacity: 0.8, mb: 0.25 }}>
+                                    Median duration
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ display: 'block', fontSize: '0.75rem', fontWeight: 500 }}>
+                                    {formatDuration(metrics.medianDuration)}
+                                  </Typography>
+                                </Box>
+                                <Box>
+                                  <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', opacity: 0.8, mb: 0.25 }}>
+                                    Rows processed
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ display: 'block', fontSize: '0.75rem', fontWeight: 500 }}>
+                                    {metrics.rowsProcessed.toLocaleString()}
+                                  </Typography>
+                                </Box>
+                              </Box>
+                            </Box>
+                          }
+                          arrow
                         >
-                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                            <Box
-                              sx={{
-                                p: 1.5,
-                                borderRadius: 2,
-                                backgroundColor: `${typeColor}20`,
-                                color: typeColor,
-                                mb: 1,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              {getNodeIcon(node.type)}
+                          <Paper
+                            elevation={0}
+                            sx={{
+                              p: 2,
+                              minWidth: '140px',
+                              background: '#ffffff',
+                              border: `0.5px solid ${layerColor.border}80`,
+                              borderRadius: 1.5,
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              position: 'relative',
+                              '&:hover': {
+                                borderColor: layerColor.accent,
+                                boxShadow: `0 2px 8px ${layerColor.accent}20`,
+                                transform: 'translateY(-2px)',
+                              },
+                            }}
+                          >
+                            <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 1.25 }}>
+                              <Box
+                                sx={{
+                                  width: 36,
+                                  height: 36,
+                                  borderRadius: 1,
+                                  background: layerColor.bg,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: layerColor.accent,
+                                }}
+                              >
+                                {getNodeIcon(node.type)}
+                              </Box>
+                              {getStatusDot(status)}
                             </Box>
                             <Typography
                               variant="body2"
                               sx={{
-                                fontWeight: 700,
-                                color: 'text.primary',
-                                fontSize: '0.85rem',
-                                mb: 0.5,
+                                fontWeight: 600,
+                                color: '#0f172a',
+                                fontSize: '0.8125rem',
+                                mb: 0.75,
+                                lineHeight: 1.3,
                               }}
                             >
                               {node.label}
@@ -247,45 +414,28 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
                               label={node.type}
                               size="small"
                               sx={{
-                                backgroundColor: `${typeColor}15`,
-                                color: typeColor,
-                                fontWeight: 600,
-                                fontSize: '0.65rem',
+                                backgroundColor: '#f1f5f9',
+                                color: '#64748b',
+                                fontWeight: 500,
+                                fontSize: '0.6875rem',
                                 height: '18px',
+                                border: 'none',
                               }}
                             />
-                          </Box>
-                        </Paper>
-                      </Grid>
-                    );
-                  })}
-                </Grid>
+                          </Paper>
+                        </Tooltip>
+                      );
+                    })}
+                  </Box>
+                )}
               </Box>
             );
           })}
-        </Box>
-
-        {/* Legend */}
-        <Box sx={{ mt: 3, p: 2, borderRadius: 2, backgroundColor: 'rgba(99, 102, 241, 0.05)', border: '1px solid rgba(99, 102, 241, 0.1)' }}>
-          <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', mb: 1, display: 'block' }}>
-            Node Types:
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            {['source', 'transform', 'aggregate', 'table'].map((type) => {
-              const typeColor = getNodeTypeColor(type);
-              return (
-                <Box key={type} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box sx={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: typeColor }} />
-                  <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'capitalize' }}>
-                    {type}
-                  </Typography>
-                </Box>
-              );
-            })}
-          </Box>
         </Box>
       </CardContent>
     </Card>
   );
 };
+
+
 

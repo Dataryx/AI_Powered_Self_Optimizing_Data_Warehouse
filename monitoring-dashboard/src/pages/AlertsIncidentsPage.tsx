@@ -1,6 +1,6 @@
 /**
  * Alerts & Incidents Dashboard Page
- * Enhanced with real-time updates and unique UI design
+ * Enterprise-grade real-time alerting, ML-based anomaly detection, and incident tracking
  */
 
 import React, { useState, useCallback } from 'react';
@@ -36,11 +36,10 @@ export const AlertsIncidentsPage: React.FC = () => {
       sx={{
         p: 3,
         minHeight: '100vh',
-        position: 'relative',
         background: 'transparent',
       }}
     >
-      {/* Header Section */}
+      {/* Page Header */}
       <Box 
         sx={{ 
           mb: 3,
@@ -56,14 +55,11 @@ export const AlertsIncidentsPage: React.FC = () => {
             variant="h4"
             gutterBottom
             sx={{
-              fontWeight: 800,
+              fontWeight: 600,
               mb: 0.5,
-              background: 'linear-gradient(135deg, #ef4444 0%, #f59e0b 50%, #3b82f6 100%)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              letterSpacing: '-0.02em',
-              fontSize: { xs: '1.75rem', md: '2rem' },
+              color: 'text.primary',
+              letterSpacing: '-0.01em',
+              fontSize: { xs: '1.5rem', md: '1.75rem' },
             }}
           >
             Alerts & Incidents Dashboard
@@ -72,7 +68,7 @@ export const AlertsIncidentsPage: React.FC = () => {
             variant="body2" 
             sx={{ 
               color: 'text.secondary', 
-              fontWeight: 500, 
+              fontWeight: 400, 
               fontSize: '0.875rem' 
             }}
           >
@@ -81,7 +77,7 @@ export const AlertsIncidentsPage: React.FC = () => {
         </Box>
 
         {/* Status & Controls */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Chip
             icon={
               <FiberManualRecord 
@@ -99,30 +95,30 @@ export const AlertsIncidentsPage: React.FC = () => {
             label={isLive ? 'Live' : 'Offline'}
             size="small"
             sx={{
-              backgroundColor: isLive ? '#10b98115' : '#ef444415',
+              backgroundColor: isLive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
               color: isLive ? '#10b981' : '#ef4444',
-              fontWeight: 600,
-              border: `1px solid ${isLive ? '#10b98140' : '#ef444440'}`,
+              fontWeight: 500,
+              border: `1px solid ${isLive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
             }}
           />
           <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
-            {isLive ? `Updated: ${formatTime(lastUpdate)}` : 'API unavailable'}
+            Last updated: {formatTime(lastUpdate)}
           </Typography>
           <IconButton
             onClick={handleRefresh}
             disabled={isRefreshing}
+            size="small"
             sx={{
-              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-              color: '#ef4444',
+              color: 'text.secondary',
               '&:hover': {
-                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                backgroundColor: 'action.hover',
                 transform: 'rotate(180deg)',
               },
               transition: 'all 0.3s',
             }}
           >
             {isRefreshing ? (
-              <CircularProgress size={20} sx={{ color: '#ef4444' }} />
+              <CircularProgress size={20} />
             ) : (
               <Refresh />
             )}
@@ -130,19 +126,18 @@ export const AlertsIncidentsPage: React.FC = () => {
         </Box>
       </Box>
 
-      {/* Alerts and Anomalies - Side by Side */}
+      {/* Section 1: Active Alerts */}
       <Box sx={{ mb: 3 }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2 }}>
-          <ActiveAlerts refreshKey={refreshKey} />
-          <AnomalyDetection refreshKey={refreshKey} />
-        </Box>
+        <ActiveAlerts refreshKey={refreshKey} />
       </Box>
 
-      {/* Incidents - Full Width */}
+      {/* Section 2 & 3: Anomaly Detection and Incident Tracker - Side by Side */}
       <Box sx={{ mb: 3 }}>
-        <IncidentTracker refreshKey={refreshKey} />
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2 }}>
+          <AnomalyDetection refreshKey={refreshKey} />
+          <IncidentTracker refreshKey={refreshKey} />
+        </Box>
       </Box>
     </Box>
   );
 };
-

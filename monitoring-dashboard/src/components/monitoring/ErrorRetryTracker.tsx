@@ -1,11 +1,13 @@
 /**
- * Error and Retry Tracker Component
- * Displays ETL errors and retry tracking with modern design
+ * Errors & Retries Component
+ * Minimal design with healthy state message if no errors
+ * Compact list if failures exist
+ * Enterprise-grade clean design
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Card, CardContent, Typography, Box, Chip, Accordion, AccordionSummary, AccordionDetails, IconButton, LinearProgress } from '@mui/material';
-import { Error as ErrorIcon, Warning, Info, ExpandMore, Refresh, CheckCircle, AccessTime } from '@mui/icons-material';
+import { Card, CardContent, Typography, Box, Chip, IconButton, Paper, Divider } from '@mui/material';
+import { Error as ErrorIcon, Warning, Refresh, CheckCircle } from '@mui/icons-material';
 import { apiService } from '../../services/api';
 
 interface ETLError {
@@ -94,14 +96,11 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
 
   if (loading && errors.length === 0) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
-        <CardContent sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-            <LinearProgress sx={{ width: '100%', height: 4, borderRadius: 3 }} />
-            <Typography variant="body2" sx={{ color: 'text.secondary', minWidth: 'fit-content' }}>
-              Loading error tracking...
-            </Typography>
-          </Box>
+      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+        <CardContent sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+            Loading error tracking...
+          </Typography>
         </CardContent>
       </Card>
     );
@@ -109,16 +108,16 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
 
   if (error && errors.length === 0) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
+      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <ErrorIcon sx={{ color: '#ef4444', fontSize: 48, mb: 2 }} />
-          <Typography variant="h6" sx={{ fontWeight: 700, color: '#ef4444', mb: 1 }}>
+          <ErrorIcon sx={{ color: '#ef4444', fontSize: 40, mb: 1.5 }} />
+          <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', mb: 0.5, fontSize: '1rem' }}>
             Error Loading Error Tracker
           </Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2, fontSize: '0.875rem' }}>
             {error}
           </Typography>
-          <IconButton onClick={fetchErrors} sx={{ color: '#ef4444' }}>
+          <IconButton onClick={fetchErrors} sx={{ color: '#6366f1', '&:hover': { backgroundColor: '#f1f5f9' } }}>
             <Refresh /> Retry
           </IconButton>
         </CardContent>
@@ -138,88 +137,40 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
   };
 
   return (
-    <Card
-      sx={{
-        height: '100%',
-        width: 500,
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-        border: '1px solid rgba(239, 68, 68, 0.1)',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.08)',
-      }}
-    >
-      <CardContent sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0 }}>
-            <Typography
-              variant="h6"
-              sx={{
-                fontWeight: 700,
-                background: 'linear-gradient(135deg, #ef4444 0%, #f87171 100%)',
-                backgroundClip: 'text',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                fontSize: '0.95rem',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Error & Retry Tracker
-            </Typography>
-            {errorCounts.total > 0 && (
+    <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+      <CardContent sx={{ p: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography
+            variant="h6"
+            sx={{
+              fontWeight: 600,
+              color: '#0f172a',
+              fontSize: '1rem',
+            }}
+          >
+            Errors & Retries
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {activeErrors.length > 0 && (
               <Chip
-                label={`${errorCounts.total}`}
+                label={`${activeErrors.length} active`}
                 size="small"
                 sx={{
-                  backgroundColor: '#ef444420',
-                  color: '#ef4444',
+                  backgroundColor: '#fef2f2',
+                  color: '#dc2626',
                   fontWeight: 600,
-                  fontSize: '0.65rem',
-                  height: '18px',
-                  whiteSpace: 'nowrap',
+                  fontSize: '0.75rem',
+                  height: '24px',
+                  border: '1px solid #fecaca',
                 }}
               />
             )}
-            {lastFetch && (
-              <Typography 
-                variant="caption" 
-                sx={{ 
-                  color: 'text.secondary', 
-                  fontSize: '0.65rem',
-                  whiteSpace: 'nowrap',
-                  ml: 'auto',
-                  display: { xs: 'none', sm: 'block' },
-                }}
-              >
-                {formatTimeAgo(lastFetch.toISOString())}
-              </Typography>
-            )}
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1 }}>
-            {errorCounts.active > 0 && (
-              <Chip
-                icon={<ErrorIcon sx={{ fontSize: 12 }} />}
-                label={errorCounts.active}
-                size="small"
-                sx={{
-                  backgroundColor: '#ef444420',
-                  color: '#ef4444',
-                  fontWeight: 700,
-                  fontSize: '0.65rem',
-                  height: '20px',
-                  whiteSpace: 'nowrap',
-                }}
-              />
-            )}
-            <IconButton 
-              size="small" 
-              onClick={fetchErrors} 
-              sx={{ 
-                color: '#ef4444',
-                padding: '4px',
-                '&:hover': {
-                  backgroundColor: '#ef444410',
-                },
+            <IconButton
+              size="small"
+              onClick={fetchErrors}
+              sx={{
+                color: '#6366f1',
+                '&:hover': { backgroundColor: '#f1f5f9' },
               }}
             >
               <Refresh sx={{ fontSize: 18 }} />
@@ -227,208 +178,123 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
           </Box>
         </Box>
 
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          {activeErrors.length === 0 ? (
-            <Box
-              sx={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                p: 3,
-                textAlign: 'center',
-                borderRadius: 2,
-                background: 'linear-gradient(135deg, #10b98110 0%, rgba(255,255,255,0.95) 100%)',
-                border: '2px solid #10b98130',
-                position: 'relative',
-                overflow: 'hidden',
-                minHeight: 200,
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: '3px',
-                  background: 'linear-gradient(90deg, #10b981 0%, #34d399 100%)',
-                },
-              }}
-            >
-              <CheckCircle sx={{ color: '#10b981', fontSize: 48, mb: 1.5 }} />
-              <Typography variant="body1" sx={{ fontWeight: 700, color: '#10b981', mb: 0.5, fontSize: '0.95rem' }}>
-                No Active Errors
-              </Typography>
-              <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
-                All ETL processes are running smoothly
-              </Typography>
-            </Box>
-          ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, overflowY: 'auto', maxHeight: 400 }}>
-              {activeErrors.slice(0, 6).map((error) => {
+        {activeErrors.length === 0 ? (
+          <Paper
+            elevation={0}
+            sx={{
+              p: 4,
+              textAlign: 'center',
+              background: '#f0fdf4',
+              border: '1px solid #bbf7d0',
+              borderRadius: 1.5,
+            }}
+          >
+            <CheckCircle sx={{ fontSize: 48, color: '#10b981', mb: 1.5 }} />
+            <Typography variant="body1" sx={{ fontWeight: 600, color: '#166534', mb: 0.5, fontSize: '0.9375rem' }}>
+              No Active Errors
+            </Typography>
+            <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+              All ETL processes are running smoothly
+            </Typography>
+          </Paper>
+        ) : (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {activeErrors.slice(0, 10).map((error) => {
               const severityColors = getSeverityColor(error.severity);
               return (
-                <Accordion
+                <Paper
                   key={error.error_id}
+                  elevation={0}
                   sx={{
-                    background: `linear-gradient(135deg, ${severityColors.bg}10 0%, rgba(255,255,255,0.95) 100%)`,
-                    border: `1.5px solid ${severityColors.border}40`,
-                    borderRadius: 2,
-                    boxShadow: 'none',
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    '&:before': { display: 'none' },
+                    p: 2,
+                    background: '#ffffff',
+                    border: `1px solid ${severityColors.border}30`,
+                    borderRadius: 1.5,
+                    transition: 'all 0.2s ease',
                     '&:hover': {
-                      transform: 'translateY(-1px)',
-                      boxShadow: `0 4px 12px ${severityColors.border}30`,
                       borderColor: severityColors.border,
+                      boxShadow: `0 2px 8px ${severityColors.border}20`,
                     },
                   }}
                 >
-                  <AccordionSummary
-                    expandIcon={<ExpandMore sx={{ color: severityColors.border, fontSize: 18 }} />}
-                    sx={{
-                      py: 1,
-                      px: 1.5,
-                      minHeight: 'auto',
-                      '& .MuiAccordionSummary-content': {
-                        alignItems: 'center',
-                        gap: 1,
-                        my: 0,
-                      },
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flex: 1, minWidth: 0 }}>
-                      <Box sx={{ mt: 0.25 }}>
-                        {getSeverityIcon(error.severity)}
-                      </Box>
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography 
-                          variant="body2" 
-                          sx={{ 
-                            fontWeight: 700, 
-                            color: 'text.primary', 
-                            mb: 0.25,
-                            fontSize: '0.8rem',
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
+                    <Box sx={{ mt: 0.25 }}>
+                      {getSeverityIcon(error.severity)}
+                    </Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: 600,
+                            color: '#0f172a',
+                            fontSize: '0.875rem',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
+                            flex: 1,
                           }}
                         >
                           {error.job_name || error.table || error.error_id}
                         </Typography>
-                        {error.table && error.job_name && (
-                          <Typography 
-                            variant="caption" 
-                            sx={{ 
-                              color: 'text.secondary', 
-                              fontSize: '0.65rem', 
-                              display: 'block', 
-                              mb: 0.25,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {error.table}
-                          </Typography>
-                        )}
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            color: 'text.secondary',
-                            fontSize: '0.7rem',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            display: 'block',
-                            mb: 0.25,
-                          }}
-                        >
-                          {error.message}
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <AccessTime sx={{ fontSize: 10, color: 'text.secondary' }} />
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
-                            {formatTimeAgo(error.occurred_at)}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, ml: 0.5 }}>
                         <Chip
                           label={error.severity}
                           size="small"
                           sx={{
-                            backgroundColor: severityColors.bg,
-                            color: severityColors.text,
-                            fontWeight: 700,
-                            fontSize: '0.6rem',
-                            height: '18px',
-                            minWidth: 'fit-content',
-                            px: 0.5,
+                            backgroundColor: severityColors.bg + '15',
+                            color: severityColors.bg,
+                            fontWeight: 600,
+                            fontSize: '0.6875rem',
+                            height: '20px',
+                            border: `1px solid ${severityColors.border}30`,
+                            ml: 1,
                           }}
                         />
+                      </Box>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#64748b',
+                          fontSize: '0.75rem',
+                          display: 'block',
+                          mb: 1,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {error.message}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                        {error.table && (
+                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                            Table: {error.table}
+                          </Typography>
+                        )}
+                        <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                          {formatTimeAgo(error.occurred_at)}
+                        </Typography>
                         {error.retry_count > 0 && (
                           <Chip
-                            icon={<Refresh sx={{ fontSize: 10 }} />}
-                            label={error.retry_count}
+                            icon={<Refresh sx={{ fontSize: 12 }} />}
+                            label={`${error.retry_count} retries`}
                             size="small"
                             sx={{
-                              backgroundColor: '#6366f120',
+                              backgroundColor: '#6366f115',
                               color: '#6366f1',
-                              fontWeight: 600,
-                              fontSize: '0.6rem',
-                              height: '16px',
+                              fontWeight: 500,
+                              fontSize: '0.6875rem',
+                              height: '20px',
+                              border: '1px solid #6366f130',
                             }}
                           />
                         )}
                       </Box>
                     </Box>
-                  </AccordionSummary>
-                  <AccordionDetails sx={{ px: 1.5, pb: 1.5, pt: 0 }}>
-                    <Box sx={{ pl: 3.5 }}>
-                      <Typography variant="body2" sx={{ mb: 1.5, color: 'text.primary', fontSize: '0.8rem', lineHeight: 1.5 }}>
-                        {error.message}
-                      </Typography>
-                      <Grid container spacing={1.5}>
-                        <Grid item xs={6} sm={4}>
-                          <Box>
-                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.25, fontSize: '0.65rem' }}>
-                              Type
-                            </Typography>
-                            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
-                              {error.type.replace('_', ' ')}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        <Grid item xs={6} sm={4}>
-                          <Box>
-                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.25, fontSize: '0.65rem' }}>
-                              Occurred At
-                            </Typography>
-                            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
-                              {new Date(error.occurred_at).toLocaleString()}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        <Grid item xs={12} sm={4}>
-                          <Box>
-                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.25, fontSize: '0.65rem' }}>
-                              Status
-                            </Typography>
-                            <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
-                              {error.status}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                      </Grid>
-                    </Box>
-                  </AccordionDetails>
-                </Accordion>
+                  </Box>
+                </Paper>
               );
             })}
-            </Box>
-          )}
-        </Box>
+          </Box>
+        )}
       </CardContent>
     </Card>
   );

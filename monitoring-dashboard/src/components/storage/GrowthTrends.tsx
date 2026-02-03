@@ -163,7 +163,28 @@ export const GrowthTrends: React.FC<GrowthTrendsProps> = ({ refreshKey = 0 }) =>
     );
   }
 
-  const chartData = (trends.trend_points || []).map((point) => ({
+  // Generate default trend line if no data
+  const generateDefaultTrend = () => {
+    const days = 30;
+    const baseValue = 1000;
+    return Array.from({ length: days }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (days - 1 - i));
+      // Gentle upward trend
+      const value = baseValue + (i * 50) + (Math.sin(i / 5) * 100);
+      return {
+        date: date.toISOString().split('T')[0],
+        bronze: value,
+        silver: value * 0.7,
+        gold: value * 0.4,
+        bronze_mb: value / 1000,
+        silver_mb: (value * 0.7) / 1000,
+        gold_mb: (value * 0.4) / 1000,
+      };
+    });
+  };
+
+  const rawChartData = (trends.trend_points || []).map((point) => ({
     ...point,
     bronze: point.bronze || 0,
     silver: point.silver || 0,
@@ -172,6 +193,11 @@ export const GrowthTrends: React.FC<GrowthTrendsProps> = ({ refreshKey = 0 }) =>
     silver_mb: (point.silver || 0) / 1000,
     gold_mb: (point.gold || 0) / 1000,
   }));
+
+  // Use default trend if no real data, or if all values are 0
+  const hasRealData = rawChartData.length > 0 && rawChartData.some(p => (p.bronze + p.silver + p.gold) > 0);
+  const chartData = hasRealData ? rawChartData : generateDefaultTrend();
+  const isPlaceholder = !hasRealData;
 
   const layers = ['bronze', 'silver', 'gold'] as const;
   const layerNames = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold' };
@@ -274,83 +300,115 @@ export const GrowthTrends: React.FC<GrowthTrendsProps> = ({ refreshKey = 0 }) =>
         </Box>
 
         {/* Growth Chart */}
-        <Box sx={{ width: '100%', height: 400, mb: 3 }}>
-          <ResponsiveContainer>
-            <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorBronze" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="colorSilver" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="colorGold" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.5} />
-              <XAxis
-                dataKey="date"
-                stroke="#64748b"
-                style={{ fontSize: '11px' }}
-                tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-              />
-              <YAxis
-                stroke="#64748b"
-                style={{ fontSize: '11px' }}
-                tickFormatter={(value) => `${(value / 1000).toFixed(0)}K`}
-              />
-              <RechartsTooltip
-                contentStyle={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.98)',
-                  border: '1px solid rgba(99, 102, 241, 0.2)',
-                  borderRadius: 12,
-                  boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15)',
-                }}
-                formatter={(value: number) => [`${(value / 1000).toFixed(1)}K rows`, '']}
-                labelFormatter={(label) => new Date(label).toLocaleDateString()}
-              />
-              <Legend />
-              {trends.bronze && (
+        <Tooltip
+          title={isPlaceholder ? "Growth data will populate as telemetry accumulates" : ""}
+          arrow
+          placement="top"
+        >
+          <Box sx={{ width: '100%', height: 400, mb: 3, position: 'relative' }}>
+            <ResponsiveContainer>
+              <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorBronze" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={isPlaceholder ? 0.15 : 0.4} />
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="colorSilver" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={isPlaceholder ? 0.15 : 0.4} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="colorGold" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={isPlaceholder ? 0.15 : 0.4} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.5} />
+                <XAxis
+                  dataKey="date"
+                  stroke="#64748b"
+                  style={{ fontSize: '11px' }}
+                  tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                />
+                <YAxis
+                  stroke="#64748b"
+                  style={{ fontSize: '11px' }}
+                  tickFormatter={(value) => `${(value / 1000).toFixed(0)}K`}
+                />
+                <RechartsTooltip
+                  contentStyle={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+                    border: '1px solid rgba(99, 102, 241, 0.2)',
+                    borderRadius: 12,
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15)',
+                  }}
+                  formatter={(value: number) => {
+                    if (isPlaceholder) return ['—', ''];
+                    return [`${(value / 1000).toFixed(1)}K rows`, ''];
+                  }}
+                  labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                />
+                <Legend />
                 <Area
                   type="monotone"
                   dataKey="bronze"
                   stroke="#f59e0b"
                   fill="url(#colorBronze)"
                   name="Bronze"
-                  strokeWidth={2.5}
-                  animationDuration={1000}
+                  strokeWidth={isPlaceholder ? 1.5 : 2.5}
+                  strokeDasharray={isPlaceholder ? '5 5' : '0'}
+                  strokeOpacity={isPlaceholder ? 0.4 : 1}
+                  animationDuration={isPlaceholder ? 0 : 1000}
                 />
-              )}
-              {trends.silver && (
                 <Area
                   type="monotone"
                   dataKey="silver"
                   stroke="#6366f1"
                   fill="url(#colorSilver)"
                   name="Silver"
-                  strokeWidth={2.5}
-                  animationDuration={1000}
+                  strokeWidth={isPlaceholder ? 1.5 : 2.5}
+                  strokeDasharray={isPlaceholder ? '5 5' : '0'}
+                  strokeOpacity={isPlaceholder ? 0.4 : 1}
+                  animationDuration={isPlaceholder ? 0 : 1000}
                 />
-              )}
-              {trends.gold && (
                 <Area
                   type="monotone"
                   dataKey="gold"
                   stroke="#10b981"
                   fill="url(#colorGold)"
                   name="Gold"
-                  strokeWidth={2.5}
-                  animationDuration={1000}
+                  strokeWidth={isPlaceholder ? 1.5 : 2.5}
+                  strokeDasharray={isPlaceholder ? '5 5' : '0'}
+                  strokeOpacity={isPlaceholder ? 0.4 : 1}
+                  animationDuration={isPlaceholder ? 0 : 1000}
                 />
-              )}
-              <ReferenceLine x={new Date().toISOString().split('T')[0]} stroke="#64748b" strokeDasharray="5 5" label="Today" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </Box>
+                {!isPlaceholder && (
+                  <ReferenceLine x={new Date().toISOString().split('T')[0]} stroke="#64748b" strokeDasharray="5 5" label="Today" />
+                )}
+              </AreaChart>
+            </ResponsiveContainer>
+            {isPlaceholder && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  pointerEvents: 'none',
+                  textAlign: 'center',
+                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                  px: 2,
+                  py: 1,
+                  borderRadius: 1,
+                  border: '1px solid #e2e8f0',
+                }}
+              >
+                <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                  Growth data will populate as telemetry accumulates
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </Tooltip>
 
         {/* Growth Statistics */}
         <Grid container spacing={2}>

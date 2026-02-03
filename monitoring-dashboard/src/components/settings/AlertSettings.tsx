@@ -36,7 +36,6 @@ export const AlertSettings: React.FC<AlertSettingsProps> = ({ refreshKey = 0 }) 
   const [configs, setConfigs] = useState<AlertConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -50,11 +49,9 @@ export const AlertSettings: React.FC<AlertSettingsProps> = ({ refreshKey = 0 }) 
       } else if (data && Array.isArray(data.config)) {
         configList = data.config;
       } else if (data && typeof data === 'object') {
-        // If it's an object, try to extract array from common properties
         configList = (data as any).alerts || (data as any).settings || [];
       }
       
-      // Ensure it's an array
       if (!Array.isArray(configList)) {
         configList = [];
       }
@@ -71,7 +68,6 @@ export const AlertSettings: React.FC<AlertSettingsProps> = ({ refreshKey = 0 }) 
       }
       
       setConfigs(configList);
-      setLastUpdate(new Date());
       setLoading(false);
     } catch (err) {
       console.error('Error fetching alert config:', err);
@@ -89,13 +85,15 @@ export const AlertSettings: React.FC<AlertSettingsProps> = ({ refreshKey = 0 }) 
 
   useEffect(() => {
     fetchConfig();
+    // Auto-refresh every 30 seconds for real-time updates
+    const interval = setInterval(fetchConfig, 30000);
+    return () => clearInterval(interval);
   }, [fetchConfig, refreshKey]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       await apiService.updateAlertConfig({ config: configs });
-      setLastUpdate(new Date());
     } catch (err) {
       console.error('Error saving alert config:', err);
     } finally {
@@ -130,81 +128,47 @@ export const AlertSettings: React.FC<AlertSettingsProps> = ({ refreshKey = 0 }) 
     }
   };
 
+  const formatAlertType = (type: string) => {
+    return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
+
   if (loading) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)' }}>
-        <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography>Loading alert settings...</Typography>
+      <Card sx={{ boxShadow: 1, border: '1px solid', borderColor: 'divider' }}>
+        <CardContent sx={{ p: 2, textAlign: 'center' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Loading alert settings...
+          </Typography>
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card
-      sx={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(239, 68, 68, 0.2)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-        height: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-        maxHeight: '600px',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: '4px',
-          background: 'linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #3b82f6 100%)',
-        },
-      }}
-    >
-      <CardContent sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Card sx={{ boxShadow: 1, border: '1px solid', borderColor: 'divider' }}>
+      <CardContent sx={{ p: 2 }}>
         {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box
-              sx={{
-                p: 0.75,
-                borderRadius: 1.5,
-                background: 'linear-gradient(135deg, #ef4444 0%, #f59e0b 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Notifications sx={{ fontSize: 18, color: 'white' }} />
-            </Box>
-            <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Alert Settings
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Configure alert thresholds
-              </Typography>
-            </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1rem', mb: 0.5 }}>
+              Alert Settings
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+              Configure alert thresholds and severity levels
+            </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: 0.5 }}>
             <Button
               size="small"
               variant="contained"
-              startIcon={<Save sx={{ fontSize: 14 }} />}
+              startIcon={<Save fontSize="small" />}
               onClick={handleSave}
               disabled={saving}
               sx={{
-                backgroundColor: '#6366f1',
-                color: 'white',
-                fontSize: '0.7rem',
+                fontSize: '0.75rem',
                 px: 1.5,
                 py: 0.5,
                 minWidth: 'auto',
-                height: '28px',
-                '&:hover': {
-                  backgroundColor: '#4f46e5',
-                },
               }}
             >
               {saving ? 'Saving...' : 'Save'}
@@ -213,47 +177,55 @@ export const AlertSettings: React.FC<AlertSettingsProps> = ({ refreshKey = 0 }) 
               onClick={fetchConfig}
               size="small"
               sx={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                color: '#ef4444',
+                color: 'text.secondary',
                 '&:hover': {
-                  backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                  backgroundColor: 'action.hover',
                   transform: 'rotate(180deg)',
                 },
                 transition: 'all 0.3s',
-                width: 28,
-                height: 28,
               }}
             >
-              <Refresh sx={{ fontSize: 14 }} />
+              <Refresh fontSize="small" />
             </IconButton>
           </Box>
         </Box>
 
+        <Divider sx={{ mb: 2 }} />
+
         {/* Settings List */}
-        <Box sx={{ flex: 1, overflowY: 'auto', pb: 0.5 }}>
-          {Array.isArray(configs) && configs.length > 0 ? configs.map((config, index) => (
-            <Box key={config.alert_type}>
-              <Box sx={{ p: 1.25, mb: 1 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+        {Array.isArray(configs) && configs.length > 0 ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {configs.map((config, index) => (
+              <Box
+                key={config.alert_type}
+                sx={{
+                  p: 1.5,
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  backgroundColor: config.enabled ? 'action.hover' : 'transparent',
+                }}
+              >
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
                   <Box sx={{ flex: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                        {config.alert_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                        {formatAlertType(config.alert_type)}
                       </Typography>
                       <Chip
                         label={config.severity}
                         size="small"
                         sx={{
-                          height: '16px',
-                          fontSize: '0.65rem',
+                          height: '20px',
+                          fontSize: '0.7rem',
                           backgroundColor: getSeverityColor(config.severity),
                           color: 'white',
-                          fontWeight: 600,
+                          fontWeight: 500,
                         }}
                       />
                     </Box>
                     {config.description && (
-                      <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
                         {config.description}
                       </Typography>
                     )}
@@ -264,18 +236,10 @@ export const AlertSettings: React.FC<AlertSettingsProps> = ({ refreshKey = 0 }) 
                         checked={config.enabled}
                         onChange={() => handleToggle(index)}
                         size="small"
-                        sx={{
-                          '& .MuiSwitch-switchBase.Mui-checked': {
-                            color: '#6366f1',
-                          },
-                          '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
-                            backgroundColor: '#6366f1',
-                          },
-                        }}
                       />
                     }
                     label=""
-                    sx={{ m: 0 }}
+                    sx={{ m: 0, ml: 1 }}
                   />
                 </Box>
                 {config.enabled && (
@@ -286,27 +250,20 @@ export const AlertSettings: React.FC<AlertSettingsProps> = ({ refreshKey = 0 }) 
                     value={config.threshold}
                     onChange={(e) => handleThresholdChange(index, parseFloat(e.target.value) || 0)}
                     size="small"
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        fontSize: '0.8rem',
-                        height: '32px',
-                      },
-                    }}
+                    sx={{ mt: 1 }}
                   />
                 )}
               </Box>
-              {index < configs.length - 1 && <Divider sx={{ my: 0.5 }} />}
-            </Box>
-          )) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                No alert settings available
-              </Typography>
-            </Box>
-          )}
-        </Box>
+            ))}
+          </Box>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              No alert settings available
+            </Typography>
+          </Box>
+        )}
       </CardContent>
     </Card>
   );
 };
-

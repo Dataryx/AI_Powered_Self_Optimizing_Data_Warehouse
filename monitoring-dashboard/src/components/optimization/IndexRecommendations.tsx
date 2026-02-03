@@ -1,24 +1,18 @@
 /**
  * Index Recommendations Component
- * Displays ML-generated index optimization recommendations
+ * ML-generated optimization suggestions - Advisory only, no apply buttons
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { 
-  Card, 
-  CardContent, 
-  Typography, 
-  Box, 
+import {
+  Card,
+  CardContent,
+  Typography,
+  Box,
   Chip,
-  IconButton,
-  Tooltip,
-  Button,
-  LinearProgress,
-  Pagination,
-  Grid,
+  Paper,
 } from '@mui/material';
-import { Refresh, Storage, TrendingUp, CheckCircle, Warning, Error as ErrorIcon, ChevronLeft, ChevronRight } from '@mui/icons-material';
-import { keyframes } from '@mui/material/styles';
+import { Storage, TrendingUp, CheckCircle } from '@mui/icons-material';
 import { apiService } from '../../services/api';
 
 interface Recommendation {
@@ -26,61 +20,82 @@ interface Recommendation {
   type: string;
   table: string;
   columns: string[];
-  estimated_improvement: number;
-  cost: number;
-  priority: string;
-  status: string;
-  created_at: string;
+  estimated_improvement?: number;
+  cost?: number;
+  priority?: string;
+  status?: string;
+  created_at?: string;
   query_count?: number;
-  avg_execution_time_ms?: number;
-  sql_statement?: string;
+  explanation?: string;
+  impact?: {
+    latency?: 'decrease' | 'increase';
+    cost?: 'decrease' | 'increase';
+    storage?: 'increase';
+  };
 }
 
 interface IndexRecommendationsProps {
   refreshKey?: number;
 }
 
-// Slide animation for pagination
-const slideIn = keyframes`
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-`;
-
-const slideOut = keyframes`
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-`;
-
-const ITEMS_PER_PAGE = 5;
-
-export const IndexRecommendations: React.FC<IndexRecommendationsProps> = ({ refreshKey = 0 }) => {
+export const IndexRecommendations: React.FC<IndexRecommendationsProps> = ({
+  refreshKey = 0,
+}) => {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const [currentPage, setCurrentPage] = useState(1);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const [applying, setApplying] = useState<string | null>(null);
+
+  const buildImpact = (rec: Recommendation) => {
+    // Prefer explicit API-provided impact, otherwise use safe heuristic defaults (UI-only)
+    if (rec.impact) return rec.impact;
+    return {
+      latency: 'decrease' as const,
+      cost: rec.cost !== undefined && rec.cost > 0 ? ('increase' as const) : ('decrease' as const),
+      storage: 'increase' as const,
+    };
+  };
+
+  const buildRationaleLine = (rec: Recommendation) => {
+    // Trigger (best-effort)
+    const explanation = rec.explanation?.trim();
+    const triggerFromExplanation =
+      explanation && explanation.length > 0
+        ? explanation.split('.').shift()?.trim()
+        : undefined;
+    const trigger =
+      triggerFromExplanation ||
+      (rec.priority?.toLowerCase() === 'high'
+        ? 'High latency or high-impact access pattern'
+        : rec.priority?.toLowerCase() === 'medium'
+          ? 'Moderate performance opportunity detected'
+          : 'Frequent scans detected');
+
+    // Observation window (best-effort)
+    const anyRec = rec as any;
+    const windowDays =
+      anyRec.observation_window_days ??
+      anyRec.window_days ??
+      anyRec.lookback_days ??
+      undefined;
+    const windowQueries = rec.query_count ?? anyRec.window_queries ?? anyRec.lookback_queries ?? undefined;
+
+    const windowLabel =
+      typeof windowDays === 'number'
+        ? `last ${windowDays} days`
+        : typeof windowQueries === 'number'
+          ? `last ${windowQueries} queries`
+          : 'recent executions';
+
+    return `Why: ${trigger} • Window: ${windowLabel}` as const;
+  };
 
   const fetchRecommendations = useCallback(async () => {
     try {
       const data = await apiService.getOptimizationRecommendations('index', 'pending');
-      setRecommendations(data.recommendations || []);
-      setLastUpdate(new Date());
+      setRecommendations(data.recommendations || data.data?.recommendations || []);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching index recommendations:', err);
+      setRecommendations([]);
       setLoading(false);
     }
   }, []);
@@ -91,322 +106,263 @@ export const IndexRecommendations: React.FC<IndexRecommendationsProps> = ({ refr
     return () => clearInterval(interval);
   }, [fetchRecommendations, refreshKey]);
 
-  const handleApply = async (recommendationId: string) => {
-    setApplying(recommendationId);
-    try {
-      await apiService.applyOptimization(recommendationId, false);
-      await fetchRecommendations();
-    } catch (err) {
-      console.error('Error applying recommendation:', err);
-    } finally {
-      setApplying(null);
-    }
-  };
-
-  const getPriorityColor = (priority: string) => {
+  const getSeverityColor = (priority?: string) => {
     switch (priority?.toLowerCase()) {
       case 'high':
-        return { bg: '#ef4444', light: '#ef444420', border: '#ef444440', icon: ErrorIcon };
+        return { bg: '#ef4444', light: '#fef2f2', text: '#991b1b' };
       case 'medium':
-        return { bg: '#f59e0b', light: '#f59e0b20', border: '#f59e0b40', icon: Warning };
+        return { bg: '#f59e0b', light: '#fef3c7', text: '#92400e' };
       case 'low':
-        return { bg: '#3b82f6', light: '#3b82f620', border: '#3b82f640', icon: CheckCircle };
+        return { bg: '#6366f1', light: '#e0e7ff', text: '#4338ca' };
       default:
-        return { bg: '#64748b', light: '#64748b20', border: '#64748b40', icon: Warning };
+        return { bg: '#64748b', light: '#f1f5f9', text: '#475569' };
     }
   };
-
-  const handlePageChange = (event: React.ChangeEvent<unknown>, value: number) => {
-    setIsAnimating(true);
-    setTimeout(() => {
-      setCurrentPage(value);
-      setIsAnimating(false);
-    }, 150);
-  };
-
-  const totalPages = Math.ceil(recommendations.length / ITEMS_PER_PAGE);
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const endIndex = startIndex + ITEMS_PER_PAGE;
-  const currentRecommendations = recommendations.slice(startIndex, endIndex);
-
-  if (loading && recommendations.length === 0) {
-    return (
-      <Card sx={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)' }}>
-        <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography>Loading index recommendations...</Typography>
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card
+      elevation={0}
       sx={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(99, 102, 241, 0.2)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 2,
         height: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-        maxHeight: '600px',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: '4px',
-          background: 'linear-gradient(90deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)',
-        },
       }}
     >
-      <CardContent sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box
-              sx={{
-                p: 0.75,
-                borderRadius: 1.5,
-                background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Storage sx={{ fontSize: 18, color: 'white' }} />
-            </Box>
-            <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Index Recommendations
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                ML-generated optimization suggestions
-              </Typography>
-            </Box>
+      <CardContent sx={{ p: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
+          <Box
+            sx={{
+              p: 1,
+              borderRadius: 1.5,
+              background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Storage sx={{ color: 'white', fontSize: 20 }} />
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Chip
-              label={recommendations.length}
-              size="small"
+          <Box sx={{ flex: 1 }}>
+            <Typography
+              variant="h6"
               sx={{
-                backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                color: '#6366f1',
                 fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
-              }}
-            />
-            <IconButton
-              onClick={fetchRecommendations}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                color: '#6366f1',
-                '&:hover': {
-                  backgroundColor: 'rgba(99, 102, 241, 0.2)',
-                  transform: 'rotate(180deg)',
-                },
-                transition: 'all 0.3s',
-                width: 28,
-                height: 28,
+                color: '#0f172a',
+                fontSize: '1rem',
+                mb: 0.25,
               }}
             >
-              <Refresh sx={{ fontSize: 14 }} />
-            </IconButton>
+              Index Recommendations
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{ color: '#64748b', fontSize: '0.75rem' }}
+            >
+              ML-generated optimization suggestions
+            </Typography>
           </Box>
         </Box>
 
-        {/* Recommendations List */}
-        {recommendations.length === 0 ? (
+        {loading ? (
           <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            <Typography variant="body2" sx={{ color: '#64748b' }}>
+              Loading recommendations...
+            </Typography>
+          </Box>
+        ) : recommendations.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <CheckCircle sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
+            <Typography
+              variant="body2"
+              sx={{ color: '#64748b', fontSize: '0.875rem', mb: 0.5 }}
+            >
               No index recommendations available
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{ color: '#94a3b8', fontSize: '0.75rem' }}
+            >
+              All tables are optimally indexed
             </Typography>
           </Box>
         ) : (
-          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <Box
-              sx={{
-                flex: 1,
-                overflowY: 'auto',
-                pb: 0.5,
-                '&::-webkit-scrollbar': {
-                  width: '6px',
-                },
-                '&::-webkit-scrollbar-track': {
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  borderRadius: '3px',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  background: 'rgba(99, 102, 241, 0.3)',
-                  borderRadius: '3px',
-                  '&:hover': {
-                    background: 'rgba(99, 102, 241, 0.5)',
-                  },
-                },
-              }}
-            >
-              {currentRecommendations.map((rec, index) => {
-                const priorityColors = getPriorityColor(rec.priority);
-                const PriorityIcon = priorityColors.icon;
-                const improvementPercent = (rec.estimated_improvement * 100).toFixed(1);
-
-                return (
-                  <Box
-                    key={rec.recommendation_id}
-                    sx={{
-                      p: 1.25,
-                      mb: 1,
-                      borderRadius: 1.5,
-                      border: `1px solid ${priorityColors.border}`,
-                      background: priorityColors.light,
-                      animation: isAnimating
-                        ? `${slideOut} 0.15s ease-out`
-                        : `${slideIn} 0.3s ease-out`,
-                      animationDelay: `${index * 0.05}s`,
-                      '&:hover': {
-                        background: priorityColors.light.replace('20', '30'),
-                        transform: 'translateX(4px)',
-                      },
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.75 }}>
-                      <Box sx={{ flex: 1 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5 }}>
-                          <PriorityIcon sx={{ fontSize: 14, color: priorityColors.bg }} />
-                          <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
-                            {rec.table}
-                          </Typography>
-                          <Chip
-                            label={rec.priority}
-                            size="small"
-                            sx={{
-                              height: '16px',
-                              fontSize: '0.65rem',
-                              backgroundColor: priorityColors.bg,
-                              color: 'white',
-                              fontWeight: 600,
-                            }}
-                          />
-                        </Box>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', ml: 2.25 }}>
-                          Columns: {rec.columns.join(', ')}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Tooltip title={`${improvementPercent}% improvement expected`}>
-                          <Chip
-                            icon={<TrendingUp sx={{ fontSize: 12 }} />}
-                            label={`+${improvementPercent}%`}
-                            size="small"
-                            sx={{
-                              height: '18px',
-                              fontSize: '0.65rem',
-                              backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                              color: '#10b981',
-                              fontWeight: 600,
-                            }}
-                          />
-                        </Tooltip>
-                      </Box>
-                    </Box>
-
-                    {rec.query_count && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75, ml: 2.25 }}>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
-                          Based on {rec.query_count} queries
-                        </Typography>
-                        {rec.avg_execution_time_ms && (
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
-                            • Avg: {rec.avg_execution_time_ms.toFixed(2)}ms
-                          </Typography>
-                        )}
-                      </Box>
-                    )}
-
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.75 }}>
-                      <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', ml: 2.25 }}>
-                        {new Date(rec.created_at).toLocaleDateString()}
-                      </Typography>
-                      <Button
-                        size="small"
-                        variant="contained"
-                        onClick={() => handleApply(rec.recommendation_id)}
-                        disabled={applying === rec.recommendation_id}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {recommendations.map((rec) => {
+              const severity = getSeverityColor(rec.priority);
+              const impact = buildImpact(rec);
+              return (
+                <Paper
+                  key={rec.recommendation_id}
+                  elevation={0}
+                  sx={{
+                    p: 2,
+                    background: '#ffffff',
+                    border: `1px solid ${severity.light}`,
+                    borderRadius: 1.5,
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      borderColor: severity.bg,
+                      boxShadow: `0 2px 8px ${severity.light}`,
+                    },
+                  }}
+                >
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography
+                        variant="body2"
                         sx={{
-                          backgroundColor: '#6366f1',
-                          color: 'white',
-                          fontSize: '0.7rem',
-                          px: 1.5,
-                          py: 0.25,
-                          minWidth: 'auto',
-                          height: '24px',
-                          '&:hover': {
-                            backgroundColor: '#4f46e5',
-                          },
+                          fontWeight: 600,
+                          color: '#0f172a',
+                          fontSize: '0.875rem',
+                          mb: 0.75,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                        title={rec.table}
+                      >
+                        {rec.table}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#64748b',
+                          fontSize: '0.75rem',
+                          lineHeight: 1.4,
+                          display: 'block',
+                          mb: 1,
                         }}
                       >
-                        {applying === rec.recommendation_id ? 'Applying...' : 'Apply'}
-                      </Button>
+                        {buildRationaleLine(rec)}
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 1 }}>
+                        {rec.columns?.map((col, idx) => (
+                          <Chip
+                            key={idx}
+                            label={col}
+                            size="small"
+                            sx={{
+                              height: '20px',
+                              fontSize: '0.6875rem',
+                              backgroundColor: '#f1f5f9',
+                              color: '#475569',
+                              fontWeight: 500,
+                            }}
+                          />
+                        ))}
+                      </Box>
                     </Box>
+                    {rec.priority && (
+                      <Chip
+                        label={rec.priority}
+                        size="small"
+                        sx={{
+                          height: '22px',
+                          fontSize: '0.6875rem',
+                          fontWeight: 600,
+                          backgroundColor: severity.light,
+                          color: severity.text,
+                          textTransform: 'capitalize',
+                          ml: 1,
+                        }}
+                      />
+                    )}
                   </Box>
-                );
-              })}
-            </Box>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <Box
-                sx={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  p: 1,
-                  background: 'linear-gradient(to top, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.8) 100%)',
-                  backdropFilter: 'blur(10px)',
-                  borderTop: '1px solid rgba(99, 102, 241, 0.1)',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                }}
-              >
-                <Pagination
-                  count={totalPages}
-                  page={currentPage}
-                  onChange={handlePageChange}
-                  size="small"
-                  siblingCount={0}
-                  boundaryCount={1}
-                  renderItem={(item) => (
-                    <Box
+                  {rec.explanation && (
+                    <Typography
+                      variant="caption"
                       sx={{
-                        ...(item.type === 'page' && {
-                          '& .MuiPaginationItem-root': {
-                            minWidth: '28px',
-                            height: '28px',
-                            fontSize: '0.75rem',
-                            color: item.selected ? 'white' : '#6366f1',
-                            backgroundColor: item.selected ? '#6366f1' : 'transparent',
-                            '&:hover': {
-                              backgroundColor: item.selected ? '#4f46e5' : 'rgba(99, 102, 241, 0.1)',
-                            },
-                          },
-                        }),
+                        color: '#64748b',
+                        fontSize: '0.75rem',
+                        lineHeight: 1.5,
+                        display: 'block',
                       }}
-                      {...item}
-                    />
+                    >
+                      {rec.explanation}
+                    </Typography>
                   )}
-                />
-              </Box>
-            )}
+
+                  {/* Potential Impact Indicators (no numbers) */}
+                  {(impact.latency || impact.cost || impact.storage) && (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1.25 }}>
+                      {impact.latency && (
+                        <Chip
+                          label={`Latency ${impact.latency === 'decrease' ? '↓' : '↑'}`}
+                          size="small"
+                          sx={{
+                            height: '22px',
+                            fontSize: '0.6875rem',
+                            backgroundColor: impact.latency === 'decrease' ? '#d1fae5' : '#fef2f2',
+                            color: impact.latency === 'decrease' ? '#10b981' : '#ef4444',
+                            fontWeight: 600,
+                          }}
+                        />
+                      )}
+                      {impact.cost && (
+                        <Chip
+                          label={`Cost ${impact.cost === 'decrease' ? '↓' : '↑'}`}
+                          size="small"
+                          sx={{
+                            height: '22px',
+                            fontSize: '0.6875rem',
+                            backgroundColor: impact.cost === 'decrease' ? '#d1fae5' : '#fef2f2',
+                            color: impact.cost === 'decrease' ? '#10b981' : '#ef4444',
+                            fontWeight: 600,
+                          }}
+                        />
+                      )}
+                      {impact.storage && (
+                        <Chip
+                          label="Storage ↑"
+                          size="small"
+                          sx={{
+                            height: '22px',
+                            fontSize: '0.6875rem',
+                            backgroundColor: '#fef3c7',
+                            color: '#92400e',
+                            fontWeight: 600,
+                          }}
+                        />
+                      )}
+                    </Box>
+                  )}
+
+                  {rec.estimated_improvement && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
+                      <TrendingUp sx={{ fontSize: 14, color: '#10b981' }} />
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#10b981',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Estimated improvement: {(rec.estimated_improvement * 100).toFixed(1)}%
+                      </Typography>
+                    </Box>
+                  )}
+                </Paper>
+              );
+            })}
           </Box>
         )}
+
+        {/* Feedback loop indicator (conceptual) */}
+        <Box sx={{ mt: 2.5, pt: 2, borderTop: '1px solid #e2e8f0' }}>
+          <Typography
+            variant="caption"
+            sx={{
+              color: '#94a3b8',
+              fontSize: '0.75rem',
+              lineHeight: 1.4,
+            }}
+          >
+            Recommendations are updated based on post-execution performance.
+          </Typography>
+        </Box>
       </CardContent>
     </Card>
   );
 };
-

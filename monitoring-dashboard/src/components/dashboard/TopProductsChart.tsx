@@ -1,10 +1,10 @@
 /**
  * Top Products Chart Component
- * Premium bar chart with gradient fills and enhanced organization
+ * Modern horizontal bar chart with improved design
  */
 
 import React, { useMemo } from 'react';
-import { Card, CardContent, Typography, Box, Chip } from '@mui/material';
+import { Card, CardContent, Typography, Box } from '@mui/material';
 import {
   BarChart,
   Bar,
@@ -12,52 +12,30 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   Cell,
-  LabelList,
 } from 'recharts';
 
 interface TopProductsChartProps {
   data: Array<{ product: string; sales_count: number; revenue: number; quantity: number }>;
 }
 
-const GRADIENT_COLORS = [
-  ['#6366f1', '#8b5cf6'], // Indigo to Purple
-  ['#ec4899', '#f472b6'], // Pink
-  ['#f59e0b', '#fbbf24'], // Amber
-  ['#10b981', '#34d399'], // Emerald
-  ['#3b82f6', '#60a5fa'], // Blue
-  ['#ef4444', '#f87171'], // Red
-  ['#06b6d4', '#22d3ee'], // Cyan
-  ['#8b5cf6', '#a78bfa'], // Purple
-  ['#14b8a6', '#2dd4bf'], // Teal
-  ['#f97316', '#fb923c'], // Orange
+const COLORS = [
+  '#6366f1', // Indigo
+  '#8b5cf6', // Purple
+  '#ec4899', // Pink
+  '#f59e0b', // Amber
+  '#10b981', // Emerald
+  '#3b82f6', // Blue
+  '#ef4444', // Red
+  '#06b6d4', // Cyan
+  '#14b8a6', // Teal
+  '#f97316', // Orange
 ];
 
-// Custom label component for bars
-const CustomBarLabel = (props: any) => {
-  const { x, y, width, value } = props;
-  if (!value || value === 0) return null;
-  const formattedValue = `$${(value / 1000000).toFixed(1)}M`;
-  return (
-    <text
-      x={(x || 0) + (width || 0) + 8}
-      y={(y || 0) + 10}
-      fill="#64748b"
-      fontSize={11}
-      fontWeight={600}
-      textAnchor="start"
-    >
-      {formattedValue}
-    </text>
-  );
-};
-
 // Truncate product name intelligently
-const truncateProductName = (name: string, maxLength: number = 30) => {
+const truncateProductName = (name: string, maxLength: number = 35) => {
   if (name.length <= maxLength) return name;
-  // Try to break at word boundary
   const truncated = name.substring(0, maxLength);
   const lastSpace = truncated.lastIndexOf(' ');
   if (lastSpace > maxLength * 0.7) {
@@ -70,27 +48,36 @@ export const TopProductsChart: React.FC<TopProductsChartProps> = ({ data }) => {
   const chartData = useMemo(() => {
     const safeData = data || [];
     if (safeData.length === 0) {
-      // Return empty array - chart will show empty state
       return [];
     }
-    return safeData
-      .sort((a, b) => (b.revenue || 0) - (a.revenue || 0)) // Ensure sorted by revenue
+    
+    // Process and validate data from API
+    const processedData = safeData
+      .map((item: any) => ({
+        product: item.product || item.product_name || 'Unknown Product',
+        sales_count: item.sales_count || item.sales || 0,
+        revenue: typeof item.revenue === 'number' ? item.revenue : parseFloat(item.revenue || 0),
+        quantity: item.quantity || item.quantity_sold || 0,
+      }))
+      .filter((item) => item.revenue > 0) // Only include products with revenue
+      .sort((a, b) => b.revenue - a.revenue) // Sort by revenue descending
       .slice(0, 10) // Take top 10
       .map((item, index) => ({
         rank: index + 1,
-        name: truncateProductName(item.product || 'Unknown Product', 28),
-        fullName: item.product || 'Unknown Product',
-        revenue: item.revenue || 0,
-        sales: item.sales_count || 0,
-        quantity: item.quantity || 0,
-        colorStart: GRADIENT_COLORS[index % GRADIENT_COLORS.length][0],
-        colorEnd: GRADIENT_COLORS[index % GRADIENT_COLORS.length][1],
-        avgRevenue: (item.revenue || 0) / (item.sales_count || 1),
+        name: truncateProductName(item.product, 35),
+        fullName: item.product,
+        revenue: item.revenue,
+        sales: item.sales_count,
+        quantity: item.quantity,
+        color: COLORS[index % COLORS.length],
+        avgRevenue: item.sales_count > 0 ? item.revenue / item.sales_count : 0,
       }));
+    
+    return processedData;
   }, [data]);
 
-  const totalRevenue = useMemo(() => {
-    return chartData.reduce((sum, item) => sum + item.revenue, 0);
+  const maxRevenue = useMemo(() => {
+    return Math.max(...chartData.map(d => d.revenue), 1);
   }, [chartData]);
 
   // Show empty state if no data
@@ -98,39 +85,35 @@ export const TopProductsChart: React.FC<TopProductsChartProps> = ({ data }) => {
     return (
       <Card
         sx={{
-          height: '100%',
-          background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-          border: '1px solid rgba(236, 72, 153, 0.1)',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.08)',
+          background: '#ffffff',
+          border: '1px solid #e5e7eb',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
         }}
       >
         <CardContent sx={{ p: 2.5 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
-            <Typography
-              variant="h6"
-              sx={{
-                fontWeight: 700,
-                background: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)',
-                backgroundClip: 'text',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                letterSpacing: '-0.01em',
-                fontSize: '1.1rem',
-              }}
-            >
-              Top Products by Revenue
-            </Typography>
-            <Chip
-              label="No data"
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(236, 72, 153, 0.1)',
-                color: '#ec4899',
-                fontWeight: 600,
-                fontSize: '0.75rem',
-                height: '24px',
-              }}
-            />
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Box>
+              <Typography
+                variant="h6"
+                sx={{
+                  fontWeight: 600,
+                  color: '#1f2937',
+                  fontSize: '1rem',
+                  mb: 0.5,
+                }}
+              >
+                Top Products by Revenue
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#6b7280',
+                  fontSize: '0.75rem',
+                }}
+              >
+                Top 10 products by revenue
+              </Typography>
+            </Box>
           </Box>
           <Box sx={{ textAlign: 'center', py: 6 }}>
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
@@ -145,139 +128,99 @@ export const TopProductsChart: React.FC<TopProductsChartProps> = ({ data }) => {
   return (
     <Card
       sx={{
-        height: '100%',
-        background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-        border: '1px solid rgba(236, 72, 153, 0.1)',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.08)',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        background: '#ffffff',
+        border: '1px solid #e5e7eb',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+        transition: 'all 0.3s ease',
         '&:hover': {
-          boxShadow: '0 20px 40px -12px rgba(236, 72, 153, 0.2), 0 0 0 1px rgba(236, 72, 153, 0.1)',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.12)',
         },
       }}
     >
       <CardContent sx={{ p: 2.5 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
+        <Box sx={{ mb: 2.5 }}>
           <Typography
             variant="h6"
             sx={{
-              fontWeight: 700,
-              background: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              letterSpacing: '-0.01em',
-              fontSize: '1.1rem',
+              fontWeight: 600,
+              color: '#1f2937',
+              fontSize: '1rem',
+              mb: 0.5,
             }}
           >
             Top Products by Revenue
           </Typography>
-          <Chip
-            label={`${chartData.length} products`}
-            size="small"
+          <Typography
+            variant="caption"
             sx={{
-              backgroundColor: 'rgba(236, 72, 153, 0.1)',
-              color: '#ec4899',
-              fontWeight: 600,
+              color: '#6b7280',
               fontSize: '0.75rem',
-              height: '24px',
             }}
-          />
-        </Box>
-        
-        {/* Summary Stats */}
-        <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
-          <Box sx={{ flex: 1, minWidth: '120px' }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', display: 'block' }}>
-              Total Revenue
-            </Typography>
-            <Typography variant="body2" sx={{ fontWeight: 700, color: '#ec4899', fontSize: '0.875rem' }}>
-              ${(totalRevenue / 1000000).toFixed(1)}M
-            </Typography>
-          </Box>
-          <Box sx={{ flex: 1, minWidth: '120px' }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', display: 'block' }}>
-              Avg per Product
-            </Typography>
-            <Typography variant="body2" sx={{ fontWeight: 700, color: '#8b5cf6', fontSize: '0.875rem' }}>
-              ${(totalRevenue / chartData.length / 1000).toFixed(0)}K
-            </Typography>
-          </Box>
+          >
+            Top {chartData.length} products by revenue
+          </Typography>
         </Box>
 
-        <Box sx={{ width: '100%', height: 380, mt: 1 }}>
+        <Box sx={{ width: '100%', height: 400, mt: 1 }}>
           <ResponsiveContainer>
             <BarChart
               data={chartData}
               layout="vertical"
-              margin={{ left: 8, right: 100, top: 10, bottom: 10 }}
-              barCategoryGap="15%"
+              margin={{ left: 120, right: 20, top: 10, bottom: 10 }}
+              barCategoryGap="12%"
             >
-              <defs>
-                {chartData.map((entry, index) => (
-                  <linearGradient
-                    key={`gradient-${index}`}
-                    id={`gradient-${index}`}
-                    x1="0"
-                    y1="0"
-                    x2="1"
-                    y2="0"
-                  >
-                    <stop offset="0%" stopColor={entry.colorStart} stopOpacity={0.9} />
-                    <stop offset="100%" stopColor={entry.colorEnd} stopOpacity={0.9} />
-                  </linearGradient>
-                ))}
-              </defs>
               <CartesianGrid
                 strokeDasharray="3 3"
-                stroke="#e2e8f0"
-                opacity={0.5}
+                stroke="#e5e7eb"
+                opacity={0.6}
                 horizontal={true}
                 vertical={false}
               />
               <XAxis
                 type="number"
-                stroke="#64748b"
-                style={{ fontSize: '11px', fontWeight: 500 }}
+                stroke="#9ca3af"
+                style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280' }}
                 tickLine={false}
-                axisLine={false}
-                tickFormatter={(value) => `$${(value / 1000000).toFixed(1)}M`}
-                domain={[0, 'dataMax + dataMax * 0.1']}
+                axisLine={{ stroke: '#e5e7eb', strokeWidth: 1 }}
+                tick={{ fill: '#6b7280' }}
+                tickFormatter={(value) => {
+                  if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+                  if (value >= 1000) return `$${(value / 1000).toFixed(0)}k`;
+                  return `$${value}`;
+                }}
+                domain={[0, maxRevenue * 1.15]}
               />
               <YAxis
                 dataKey="name"
                 type="category"
-                width={180}
-                stroke="#64748b"
+                width={110}
+                stroke="#9ca3af"
                 style={{ fontSize: '11px', fontWeight: 500 }}
                 tickLine={false}
                 axisLine={false}
-                tick={{ fill: '#1e293b' }}
+                tick={{ fill: '#1f2937' }}
               />
               <Tooltip
                 contentStyle={{
                   backgroundColor: 'rgba(255, 255, 255, 0.98)',
-                  border: '1px solid rgba(236, 72, 153, 0.2)',
-                  borderRadius: 12,
-                  boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15)',
-                  padding: '14px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 8,
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                  padding: '12px 16px',
+                }}
+                formatter={(value: number) => {
+                  return [`$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, 'Revenue'];
+                }}
+                labelStyle={{ 
+                  color: '#1f2937', 
+                  fontWeight: 600, 
                   fontSize: '12px',
+                  marginBottom: '8px'
                 }}
-                formatter={(value: number, name: string, props: any) => {
-                  if (name === 'Revenue ($)') {
-                    return [
-                      `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
-                      'Revenue',
-                    ];
-                  }
-                  return [value, name];
-                }}
-                labelFormatter={(label, payload) => {
-                  const data = payload?.[0]?.payload;
-                  return (
-                    <Box sx={{ mb: 1, fontWeight: 700, color: '#1e293b', fontSize: '13px' }}>
-                      #{data?.rank}. {data?.fullName || label}
-                    </Box>
-                  );
+                itemStyle={{ 
+                  color: '#6b7280', 
+                  fontSize: '12px',
+                  padding: '2px 0'
                 }}
                 content={(props: any) => {
                   const { active, payload } = props;
@@ -287,26 +230,26 @@ export const TopProductsChart: React.FC<TopProductsChartProps> = ({ data }) => {
                     <Box
                       sx={{
                         backgroundColor: 'rgba(255, 255, 255, 0.98)',
-                        border: '1px solid rgba(236, 72, 153, 0.2)',
+                        border: '1px solid #e5e7eb',
                         borderRadius: 2,
                         p: 1.5,
-                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15)',
+                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
                       }}
                     >
-                      <Typography variant="caption" sx={{ fontWeight: 700, color: '#1e293b', display: 'block', mb: 1 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 700, color: '#1f2937', display: 'block', mb: 1 }}>
                         #{data.rank}. {data.fullName}
                       </Typography>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          <Typography variant="caption" sx={{ color: '#6b7280' }}>
                             Revenue:
                           </Typography>
-                          <Typography variant="caption" sx={{ fontWeight: 700, color: '#ec4899' }}>
-                            ${data.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: '#6366f1' }}>
+                            ${data.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                           </Typography>
                         </Box>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          <Typography variant="caption" sx={{ color: '#6b7280' }}>
                             Sales:
                           </Typography>
                           <Typography variant="caption" sx={{ fontWeight: 600 }}>
@@ -314,8 +257,8 @@ export const TopProductsChart: React.FC<TopProductsChartProps> = ({ data }) => {
                           </Typography>
                         </Box>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Avg:
+                          <Typography variant="caption" sx={{ color: '#6b7280' }}>
+                            Avg per Sale:
                           </Typography>
                           <Typography variant="caption" sx={{ fontWeight: 600 }}>
                             ${data.avgRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
@@ -325,30 +268,25 @@ export const TopProductsChart: React.FC<TopProductsChartProps> = ({ data }) => {
                     </Box>
                   );
                 }}
-                cursor={{ fill: 'rgba(236, 72, 153, 0.08)' }}
+                cursor={{ fill: 'rgba(99, 102, 241, 0.08)' }}
               />
               <Bar
                 dataKey="revenue"
-                name="Revenue ($)"
-                radius={[0, 10, 10, 0]}
-                animationDuration={1200}
+                name="Revenue"
+                radius={[0, 6, 6, 0]}
+                animationDuration={800}
                 animationBegin={0}
-                minPointSize={5}
               >
                 {chartData.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={`url(#gradient-${index})`}
+                    fill={entry.color}
                     style={{
-                      filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.12))',
+                      opacity: 0.85,
                       transition: 'all 0.3s ease',
                     }}
                   />
                 ))}
-                <LabelList
-                  content={<CustomBarLabel />}
-                  position="right"
-                />
               </Bar>
             </BarChart>
           </ResponsiveContainer>

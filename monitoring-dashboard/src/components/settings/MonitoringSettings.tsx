@@ -3,7 +3,7 @@
  * Configure monitoring intervals and data retention
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Card, 
   CardContent, 
@@ -16,7 +16,6 @@ import {
   FormControl,
   InputLabel,
   IconButton,
-  Chip,
 } from '@mui/material';
 import { Refresh, Save, Settings } from '@mui/icons-material';
 
@@ -32,13 +31,38 @@ export const MonitoringSettings: React.FC<MonitoringSettingsProps> = ({ refreshK
     alertCheckInterval: 60,
   });
   const [saving, setSaving] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+
+  // Fetch settings from backend (if API exists) or use defaults
+  const fetchSettings = useCallback(async () => {
+    try {
+      // TODO: Add API endpoint for monitoring settings if available
+      // const data = await apiService.getMonitoringSettings();
+      // if (data) setSettings(data);
+      setLastUpdate(new Date());
+    } catch (err) {
+      console.error('Error fetching monitoring settings:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+    // Auto-refresh every 30 seconds for real-time updates
+    const interval = setInterval(fetchSettings, 30000);
+    return () => clearInterval(interval);
+  }, [fetchSettings, refreshKey]);
 
   const handleSave = async () => {
     setSaving(true);
-    // Simulate save
-    setTimeout(() => {
+    try {
+      // TODO: Add API endpoint for saving monitoring settings if available
+      // await apiService.updateMonitoringSettings(settings);
+      setLastUpdate(new Date());
+    } catch (err) {
+      console.error('Error saving monitoring settings:', err);
+    } finally {
       setSaving(false);
-    }, 1000);
+    }
   };
 
   const handleChange = (field: string, value: any) => {
@@ -46,144 +70,94 @@ export const MonitoringSettings: React.FC<MonitoringSettingsProps> = ({ refreshK
   };
 
   return (
-    <Card
-      sx={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(99, 102, 241, 0.2)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-        height: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-        maxHeight: '600px',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: '4px',
-          background: 'linear-gradient(90deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)',
-        },
-      }}
-    >
-      <CardContent sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Card sx={{ boxShadow: 1, border: '1px solid', borderColor: 'divider' }}>
+      <CardContent sx={{ p: 2 }}>
         {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box
-              sx={{
-                p: 0.75,
-                borderRadius: 1.5,
-                background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Settings sx={{ fontSize: 18, color: 'white' }} />
-            </Box>
-            <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Monitoring Settings
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Configure monitoring intervals
-              </Typography>
-            </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1rem', mb: 0.5 }}>
+              Monitoring Settings
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+              Configure monitoring intervals and data retention
+            </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Save sx={{ fontSize: 14 }} />}
-              onClick={handleSave}
-              disabled={saving}
-              sx={{
-                backgroundColor: '#6366f1',
-                color: 'white',
-                fontSize: '0.7rem',
-                px: 1.5,
-                py: 0.5,
-                minWidth: 'auto',
-                height: '28px',
-                '&:hover': {
-                  backgroundColor: '#4f46e5',
-                },
-              }}
-            >
-              {saving ? 'Saving...' : 'Save'}
-            </Button>
-          </Box>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<Save fontSize="small" />}
+            onClick={handleSave}
+            disabled={saving}
+            sx={{
+              fontSize: '0.75rem',
+              px: 1.5,
+              py: 0.5,
+              minWidth: 'auto',
+            }}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </Button>
         </Box>
 
+        <Box sx={{ borderTop: '1px solid', borderColor: 'divider', pt: 2, mt: 2 }} />
+
         {/* Settings Form */}
-        <Box sx={{ flex: 1, overflowY: 'auto', pb: 0.5 }}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-            <TextField
-              fullWidth
-              type="number"
-              label="Dashboard Refresh Interval (seconds)"
-              value={settings.refreshInterval}
-              onChange={(e) => handleChange('refreshInterval', parseInt(e.target.value) || 30)}
-              size="small"
-              helperText="How often the dashboard refreshes data"
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  fontSize: '0.8rem',
-                },
-              }}
-            />
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <TextField
+            fullWidth
+            type="number"
+            label="Dashboard Refresh Interval"
+            value={settings.refreshInterval}
+            onChange={(e) => handleChange('refreshInterval', parseInt(e.target.value) || 30)}
+            size="small"
+            helperText="How often the dashboard refreshes data (seconds)"
+            InputProps={{
+              endAdornment: <Typography variant="caption" sx={{ color: 'text.secondary', mr: 1 }}>sec</Typography>,
+            }}
+          />
 
-            <TextField
-              fullWidth
-              type="number"
-              label="Data Retention (days)"
-              value={settings.dataRetentionDays}
-              onChange={(e) => handleChange('dataRetentionDays', parseInt(e.target.value) || 90)}
-              size="small"
-              helperText="How long to keep historical data"
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  fontSize: '0.8rem',
-                },
-              }}
-            />
+          <TextField
+            fullWidth
+            type="number"
+            label="Data Retention"
+            value={settings.dataRetentionDays}
+            onChange={(e) => handleChange('dataRetentionDays', parseInt(e.target.value) || 90)}
+            size="small"
+            helperText="How long to keep historical data"
+            InputProps={{
+              endAdornment: <Typography variant="caption" sx={{ color: 'text.secondary', mr: 1 }}>days</Typography>,
+            }}
+          />
 
-            <FormControl fullWidth size="small">
-              <InputLabel sx={{ fontSize: '0.8rem' }}>Metrics Aggregation Interval</InputLabel>
-              <Select
-                value={settings.metricsInterval}
-                label="Metrics Aggregation Interval"
-                onChange={(e) => handleChange('metricsInterval', e.target.value)}
-                sx={{ fontSize: '0.8rem' }}
-              >
-                <MenuItem value="1m">1 minute</MenuItem>
-                <MenuItem value="5m">5 minutes</MenuItem>
-                <MenuItem value="15m">15 minutes</MenuItem>
-                <MenuItem value="1h">1 hour</MenuItem>
-                <MenuItem value="1d">1 day</MenuItem>
-              </Select>
-            </FormControl>
+          <FormControl fullWidth size="small">
+            <InputLabel>Metrics Aggregation Interval</InputLabel>
+            <Select
+              value={settings.metricsInterval}
+              label="Metrics Aggregation Interval"
+              onChange={(e) => handleChange('metricsInterval', e.target.value)}
+            >
+              <MenuItem value="1m">1 minute</MenuItem>
+              <MenuItem value="5m">5 minutes</MenuItem>
+              <MenuItem value="15m">15 minutes</MenuItem>
+              <MenuItem value="1h">1 hour</MenuItem>
+              <MenuItem value="1d">1 day</MenuItem>
+            </Select>
+          </FormControl>
 
-            <TextField
-              fullWidth
-              type="number"
-              label="Alert Check Interval (seconds)"
-              value={settings.alertCheckInterval}
-              onChange={(e) => handleChange('alertCheckInterval', parseInt(e.target.value) || 60)}
-              size="small"
-              helperText="How often to check for new alerts"
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  fontSize: '0.8rem',
-                },
-              }}
-            />
-          </Box>
+          <TextField
+            fullWidth
+            type="number"
+            label="Alert Check Interval"
+            value={settings.alertCheckInterval}
+            onChange={(e) => handleChange('alertCheckInterval', parseInt(e.target.value) || 60)}
+            size="small"
+            helperText="How often to check for new alerts"
+            InputProps={{
+              endAdornment: <Typography variant="caption" sx={{ color: 'text.secondary', mr: 1 }}>sec</Typography>,
+            }}
+          />
         </Box>
       </CardContent>
     </Card>
   );
 };
-

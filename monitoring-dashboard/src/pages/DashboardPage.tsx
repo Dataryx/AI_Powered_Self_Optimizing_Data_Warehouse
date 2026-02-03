@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Box, Typography, Grid, CircularProgress, Alert, Paper } from '@mui/material';
+import { Box, Typography, Grid, CircularProgress, Alert, Paper, Card, CardContent } from '@mui/material';
 import { apiService } from '../services/api';
 import { StatCard } from '../components/dashboard/StatCard';
 import { SalesChart } from '../components/dashboard/SalesChart';
@@ -47,6 +47,11 @@ export const DashboardPage: React.FC = () => {
           setCustomerStats(customers);
           setError(null);
           setLoading(false);
+          
+          // Log data for debugging
+          if (sales?.top_products) {
+            console.log('Top Products Data:', sales.top_products);
+          }
         }
       } catch (err: any) {
         if (isMounted) {
@@ -121,89 +126,373 @@ export const DashboardPage: React.FC = () => {
         </Typography>
       </Box>
 
-      {/* Warehouse Overview - Always show */}
-      <Box sx={{ mb: 3 }}>
-        {error && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            API unavailable. Showing placeholder data. {error}
-          </Alert>
-        )}
-        {loading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 2 }}>
-            <CircularProgress size={40} />
-          </Box>
-        )}
-        <WarehouseOverview summary={displaySummary} />
-      </Box>
+      {/* Error and Loading */}
+      {error && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          API unavailable. Showing placeholder data. {error}
+        </Alert>
+      )}
+      {loading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 2 }}>
+          <CircularProgress size={40} />
+        </Box>
+      )}
 
-      {/* Key Statistics */}
+      {/* Warehouse Overview and Key Statistics - Side by Side */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Records"
-            value={totalRows.toLocaleString()}
-            icon={<Assessment sx={{ fontSize: 24 }} />}
-            color="#1976d2"
-            subtitle="Across all layers"
-          />
+        {/* Left Card - Warehouse Overview */}
+        <Grid item xs={12} md={6}>
+          <WarehouseOverview summary={displaySummary} />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Tables"
-            value={totalTables}
-            icon={<Inventory sx={{ fontSize: 32 }} />}
-            color="#dc004e"
-            subtitle="Bronze, Silver, Gold"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Sales"
-            value={displaySalesStats.total_sales?.count?.toLocaleString() || '0'}
-            icon={<ShoppingCart sx={{ fontSize: 32 }} />}
-            color="#4caf50"
-            subtitle={error ? 'API unavailable' : 'Sales transactions'}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Revenue"
-            value={`$${(displaySalesStats.total_sales?.revenue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-            icon={<AttachMoney sx={{ fontSize: 32 }} />}
-            color="#ff9800"
-            subtitle={error ? 'API unavailable' : 'From all sales'}
-          />
-        </Grid>
-      </Grid>
 
-      {/* Sales Statistics - Always show */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {/* Right Card - Key Statistics */}
         <Grid item xs={12} md={6}>
-          <StatCard
-            title="Average Sale Value"
-            value={`$${(displaySalesStats.total_sales?.avg_sale || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
-            icon={<TrendingUp sx={{ fontSize: 32 }} />}
-            color="#9c27b0"
-            subtitle={error ? 'API unavailable' : 'Per transaction'}
-          />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <StatCard
-            title="Total Customers"
-            value={(displayCustomerStats.total_customers || 0).toLocaleString()}
-            icon={<People sx={{ fontSize: 32 }} />}
-            color="#0288d1"
-            subtitle={error ? 'API unavailable' : 'Registered customers'}
-          />
+          <Card
+            sx={{
+              borderRadius: 2,
+              background: '#ffffff',
+              border: '1px solid #e5e7eb',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+              height: '100%',
+            }}
+          >
+            <CardContent sx={{ p: 1.5 }}>
+              <Typography
+                variant="h6"
+                sx={{
+                  fontWeight: 600,
+                  color: '#1f2937',
+                  fontSize: '0.875rem',
+                  mb: 1,
+                }}
+              >
+                Key Statistics
+              </Typography>
+              <Grid container spacing={1}>
+                <Grid item xs={4}>
+                  <Box
+                    sx={{
+                      p: 1,
+                      borderRadius: 1,
+                      background: '#eff6ff',
+                      border: 'none',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                      <Box
+                        sx={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          backgroundColor: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#1976d2',
+                          mb: 0.75,
+                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+                        }}
+                      >
+                        <Assessment sx={{ fontSize: 14 }} />
+                      </Box>
+                      <Typography
+                        variant="h6"
+                        sx={{
+                          fontWeight: 700,
+                          color: '#1f2937',
+                          fontSize: '0.875rem',
+                          lineHeight: 1.2,
+                          mb: 0.25,
+                        }}
+                      >
+                        {totalRows.toLocaleString()}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#6b7280',
+                          fontSize: '0.65rem',
+                          fontWeight: 500,
+                        }}
+                      >
+                        Total Records
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+                <Grid item xs={4}>
+                  <Box
+                    sx={{
+                      p: 1,
+                      borderRadius: 1,
+                      background: '#fef2f2',
+                      border: 'none',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                      <Box
+                        sx={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          backgroundColor: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#dc004e',
+                          mb: 0.75,
+                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+                        }}
+                      >
+                        <Inventory sx={{ fontSize: 14 }} />
+                      </Box>
+                      <Typography
+                        variant="h6"
+                        sx={{
+                          fontWeight: 700,
+                          color: '#1f2937',
+                          fontSize: '0.875rem',
+                          lineHeight: 1.2,
+                          mb: 0.25,
+                        }}
+                      >
+                        {totalTables}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#6b7280',
+                          fontSize: '0.65rem',
+                          fontWeight: 500,
+                        }}
+                      >
+                        Total Tables
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+                <Grid item xs={4}>
+                  <Box
+                    sx={{
+                      p: 1,
+                      borderRadius: 1,
+                      background: '#f0fdf4',
+                      border: 'none',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                      <Box
+                        sx={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          backgroundColor: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#4caf50',
+                          mb: 0.75,
+                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+                        }}
+                      >
+                        <ShoppingCart sx={{ fontSize: 14 }} />
+                      </Box>
+                      <Typography
+                        variant="h6"
+                        sx={{
+                          fontWeight: 700,
+                          color: '#1f2937',
+                          fontSize: '0.875rem',
+                          lineHeight: 1.2,
+                          mb: 0.25,
+                        }}
+                      >
+                        {displaySalesStats.total_sales?.count?.toLocaleString() || '0'}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#6b7280',
+                          fontSize: '0.65rem',
+                          fontWeight: 500,
+                        }}
+                      >
+                        Total Sales
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+                <Grid item xs={4}>
+                  <Box
+                    sx={{
+                      p: 1,
+                      borderRadius: 1,
+                      background: '#fff7ed',
+                      border: 'none',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                      <Box
+                        sx={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          backgroundColor: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#ff9800',
+                          mb: 0.75,
+                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+                        }}
+                      >
+                        <AttachMoney sx={{ fontSize: 14 }} />
+                      </Box>
+                      <Typography
+                        variant="h6"
+                        sx={{
+                          fontWeight: 700,
+                          color: '#1f2937',
+                          fontSize: '0.875rem',
+                          lineHeight: 1.2,
+                          mb: 0.25,
+                        }}
+                      >
+                        ${(displaySalesStats.total_sales?.revenue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#6b7280',
+                          fontSize: '0.65rem',
+                          fontWeight: 500,
+                        }}
+                      >
+                        Total Revenue
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+                <Grid item xs={4}>
+                  <Box
+                    sx={{
+                      p: 1,
+                      borderRadius: 1,
+                      background: '#faf5ff',
+                      border: 'none',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                      <Box
+                        sx={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          backgroundColor: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#9c27b0',
+                          mb: 0.75,
+                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+                        }}
+                      >
+                        <TrendingUp sx={{ fontSize: 14 }} />
+                      </Box>
+                      <Typography
+                        variant="h6"
+                        sx={{
+                          fontWeight: 700,
+                          color: '#1f2937',
+                          fontSize: '0.875rem',
+                          lineHeight: 1.2,
+                          mb: 0.25,
+                        }}
+                      >
+                        ${(displaySalesStats.total_sales?.avg_sale || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#6b7280',
+                          fontSize: '0.65rem',
+                          fontWeight: 500,
+                        }}
+                      >
+                        Avg Sale Value
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+                <Grid item xs={4}>
+                  <Box
+                    sx={{
+                      p: 1,
+                      borderRadius: 1,
+                      background: '#e0f2fe',
+                      border: 'none',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                      <Box
+                        sx={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          backgroundColor: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#0288d1',
+                          mb: 0.75,
+                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+                        }}
+                      >
+                        <People sx={{ fontSize: 14 }} />
+                      </Box>
+                      <Typography
+                        variant="h6"
+                        sx={{
+                          fontWeight: 700,
+                          color: '#1f2937',
+                          fontSize: '0.875rem',
+                          lineHeight: 1.2,
+                          mb: 0.25,
+                        }}
+                      >
+                        {(displayCustomerStats.total_customers || 0).toLocaleString()}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#6b7280',
+                          fontSize: '0.65rem',
+                          fontWeight: 500,
+                        }}
+                      >
+                        Total Customers
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
 
       {/* Charts - Always show */}
       <Grid container spacing={2}>
-        <Grid item xs={12} lg={8}>
+        <Grid item xs={12}>
           <SalesChart data={displaySalesStats.daily_sales || []} />
         </Grid>
-        <Grid item xs={12} lg={4}>
+        <Grid item xs={12}>
           <TopProductsChart data={displaySalesStats.top_products || []} />
         </Grid>
       </Grid>

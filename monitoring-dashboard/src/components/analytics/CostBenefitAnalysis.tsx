@@ -134,10 +134,41 @@ export const CostBenefitAnalysis: React.FC<CostBenefitAnalysisProps> = ({ refres
             </Box>
             <Box>
               <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Cost Benefit Analysis
+                Optimization Impact (ROI)
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                ROI trends and savings
+                ROI and savings from applied optimizations
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#94a3b8',
+                  fontSize: '0.7rem',
+                  display: 'block',
+                  mt: 0.25,
+                }}
+              >
+                Metrics reflect the impact of applied optimizations.
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#94a3b8',
+                  fontSize: '0.7rem',
+                  display: 'block',
+                }}
+              >
+                Baseline derived from pre-optimization performance metrics.
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#94a3b8',
+                  fontSize: '0.7rem',
+                  display: 'block',
+                }}
+              >
+                Compared to pre-optimization baseline.
               </Typography>
             </Box>
           </Box>

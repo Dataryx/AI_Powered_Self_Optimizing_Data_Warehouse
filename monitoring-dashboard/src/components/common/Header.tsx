@@ -1,13 +1,20 @@
 /**
  * Header Component
- * Top navigation bar with status indicators
+ * Top navigation bar with status indicators and sidebar toggle
  */
 
 import React, { useState, useEffect } from 'react';
-import { AppBar, Toolbar, Typography, Box, Chip } from '@mui/material';
+import { AppBar, Toolbar, Typography, Box, Chip, IconButton, Tooltip } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
+import MenuIcon from '@mui/icons-material/Menu';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  sidebarOpen?: boolean;
+  onSidebarToggle?: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({ sidebarOpen = true, onSidebarToggle }) => {
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
 
@@ -37,6 +44,23 @@ export const Header: React.FC = () => {
       }}
     >
       <Toolbar sx={{ px: { xs: 2, sm: 3 } }}>
+        <Tooltip title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
+          <IconButton
+            edge="start"
+            onClick={onSidebarToggle}
+            sx={{
+              mr: 2,
+              color: 'text.secondary',
+              '&:hover': {
+                backgroundColor: 'action.hover',
+                color: 'text.primary',
+              },
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {sidebarOpen ? <ChevronLeftIcon /> : <MenuIcon />}
+          </IconButton>
+        </Tooltip>
         <Typography
           variant="h6"
           component="div"

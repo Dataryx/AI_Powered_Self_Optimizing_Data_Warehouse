@@ -1,6 +1,6 @@
 /**
  * Monitoring System Settings Page
- * Enhanced with real-time updates and unique UI design
+ * Enterprise-grade settings configuration interface
  */
 
 import React, { useState, useCallback } from 'react';
@@ -36,11 +36,10 @@ export const SettingsPage: React.FC = () => {
       sx={{
         p: 3,
         minHeight: '100vh',
-        position: 'relative',
         background: 'transparent',
       }}
     >
-      {/* Header Section */}
+      {/* Page Header */}
       <Box 
         sx={{ 
           mb: 3,
@@ -56,14 +55,11 @@ export const SettingsPage: React.FC = () => {
             variant="h4"
             gutterBottom
             sx={{
-              fontWeight: 800,
+              fontWeight: 600,
               mb: 0.5,
-              background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #10b981 100%)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              letterSpacing: '-0.02em',
-              fontSize: { xs: '1.75rem', md: '2rem' },
+              color: 'text.primary',
+              letterSpacing: '-0.01em',
+              fontSize: { xs: '1.5rem', md: '1.75rem' },
             }}
           >
             Monitoring System Settings
@@ -72,7 +68,7 @@ export const SettingsPage: React.FC = () => {
             variant="body2" 
             sx={{ 
               color: 'text.secondary', 
-              fontWeight: 500, 
+              fontWeight: 400, 
               fontSize: '0.875rem' 
             }}
           >
@@ -81,7 +77,7 @@ export const SettingsPage: React.FC = () => {
         </Box>
 
         {/* Status & Controls */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Chip
             icon={
               <FiberManualRecord 
@@ -99,30 +95,30 @@ export const SettingsPage: React.FC = () => {
             label={isLive ? 'Live' : 'Offline'}
             size="small"
             sx={{
-              backgroundColor: isLive ? '#10b98115' : '#ef444415',
+              backgroundColor: isLive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
               color: isLive ? '#10b981' : '#ef4444',
-              fontWeight: 600,
-              border: `1px solid ${isLive ? '#10b98140' : '#ef444440'}`,
+              fontWeight: 500,
+              border: `1px solid ${isLive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
             }}
           />
           <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
-            {isLive ? `Updated: ${formatTime(lastUpdate)}` : 'API unavailable'}
+            Last updated: {formatTime(lastUpdate)}
           </Typography>
           <IconButton
             onClick={handleRefresh}
             disabled={isRefreshing}
+            size="small"
             sx={{
-              backgroundColor: 'rgba(99, 102, 241, 0.1)',
-              color: '#6366f1',
+              color: 'text.secondary',
               '&:hover': {
-                backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                backgroundColor: 'action.hover',
                 transform: 'rotate(180deg)',
               },
               transition: 'all 0.3s',
             }}
           >
             {isRefreshing ? (
-              <CircularProgress size={20} sx={{ color: '#6366f1' }} />
+              <CircularProgress size={20} />
             ) : (
               <Refresh />
             )}
@@ -130,15 +126,18 @@ export const SettingsPage: React.FC = () => {
         </Box>
       </Box>
 
-      {/* Settings Components - Grid Layout */}
+      {/* Settings Sections */}
+      {/* Row 1: Alert Settings and Monitoring Settings */}
       <Box sx={{ mb: 3 }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2, mb: 2 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2 }}>
           <AlertSettings refreshKey={refreshKey} />
           <MonitoringSettings refreshKey={refreshKey} />
         </Box>
-        <Box>
-          <SystemSettings refreshKey={refreshKey} />
-        </Box>
+      </Box>
+
+      {/* Row 2: System Settings - Full Width */}
+      <Box>
+        <SystemSettings refreshKey={refreshKey} />
       </Box>
     </Box>
   );

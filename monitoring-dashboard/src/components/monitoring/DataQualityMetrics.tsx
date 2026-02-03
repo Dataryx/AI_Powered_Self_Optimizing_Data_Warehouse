@@ -1,21 +1,13 @@
 /**
- * Data Quality Metrics Component
- * Displays data quality metrics per pipeline stage
+ * Data Quality Component
+ * One card per layer (Bronze, Silver, Gold)
+ * Overall quality score and top failing rules
+ * Enterprise-grade minimal design
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Card, CardContent, Typography, Box, Grid, LinearProgress, IconButton, Chip, Tooltip } from '@mui/material';
-import { CheckCircle, Warning, Error as ErrorIcon, Refresh, TrendingUp, Assessment } from '@mui/icons-material';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer,
-  Cell,
-} from 'recharts';
+import { Card, CardContent, Typography, Box, Grid, IconButton, Chip, Paper, Divider } from '@mui/material';
+import { CheckCircle, Warning, Error as ErrorIcon, Refresh } from '@mui/icons-material';
 import { apiService } from '../../services/api';
 
 interface TableQuality {
@@ -82,18 +74,22 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
     return Object.values(quality).reduce((sum, layer) => sum + (layer.tables?.length || 0), 0);
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string, score?: number) => {
+    // Use muted amber for low scores instead of red
+    if (score !== undefined && score < 20) {
+      return { bg: '#d97706', light: '#d9770620', border: '#d9770640', text: '#92400e' };
+    }
     switch (status) {
       case 'excellent':
-        return { bg: '#10b981', light: '#10b98120', border: '#10b98140' };
+        return { bg: '#10b981', light: '#10b98120', border: '#10b98140', text: '#065f46' };
       case 'good':
-        return { bg: '#3b82f6', light: '#3b82f620', border: '#3b82f640' };
+        return { bg: '#3b82f6', light: '#3b82f620', border: '#3b82f640', text: '#1e40af' };
       case 'fair':
-        return { bg: '#f59e0b', light: '#f59e0b20', border: '#f59e0b40' };
+        return { bg: '#f59e0b', light: '#f59e0b20', border: '#f59e0b40', text: '#92400e' };
       case 'poor':
-        return { bg: '#ef4444', light: '#ef444420', border: '#ef444440' };
+        return { bg: '#d97706', light: '#d9770620', border: '#d9770640', text: '#92400e' }; // Muted amber instead of red
       default:
-        return { bg: '#64748b', light: '#64748b20', border: '#64748b40' };
+        return { bg: '#64748b', light: '#64748b20', border: '#64748b40', text: '#334155' };
     }
   };
 
@@ -116,14 +112,11 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
 
   if (loading && totalTables === 0) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
-        <CardContent sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-            <LinearProgress sx={{ width: '100%', height: 6, borderRadius: 3 }} />
-            <Typography variant="body2" sx={{ color: 'text.secondary', minWidth: 'fit-content' }}>
-              Loading quality metrics...
-            </Typography>
-          </Box>
+      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+        <CardContent sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+            Loading quality metrics...
+          </Typography>
         </CardContent>
       </Card>
     );
@@ -131,16 +124,16 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
 
   if (error && totalTables === 0) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
+      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <ErrorIcon sx={{ color: '#ef4444', fontSize: 48, mb: 2 }} />
-          <Typography variant="h6" sx={{ fontWeight: 700, color: '#ef4444', mb: 1 }}>
+          <ErrorIcon sx={{ color: '#ef4444', fontSize: 40, mb: 1.5 }} />
+          <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', mb: 0.5, fontSize: '1rem' }}>
             Error Loading Quality Metrics
           </Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2, fontSize: '0.875rem' }}>
             {error}
           </Typography>
-          <IconButton onClick={fetchQuality} sx={{ color: '#10b981' }}>
+          <IconButton onClick={fetchQuality} sx={{ color: '#6366f1', '&:hover': { backgroundColor: '#f1f5f9' } }}>
             <Refresh /> Retry
           </IconButton>
         </CardContent>
@@ -179,267 +172,199 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
     );
   }
 
+  // Get top failing rules per layer
+  const getTopFailingRules = (layerData: { tables: TableQuality[] }) => {
+    const rules: { name: string; count: number }[] = [];
+    layerData.tables.forEach((table) => {
+      if (table.dead_rows > 0) {
+        const existing = rules.find((r) => r.name === 'Dead rows');
+        if (existing) existing.count += table.dead_rows;
+        else rules.push({ name: 'Dead rows', count: table.dead_rows });
+      }
+      if (table.quality_score < 80) {
+        const existing = rules.find((r) => r.name === 'Low quality score');
+        if (existing) existing.count += 1;
+        else rules.push({ name: 'Low quality score', count: 1 });
+      }
+    });
+    return rules.sort((a, b) => b.count - a.count).slice(0, 3);
+  };
+
   return (
-    <Card
-      sx={{
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-        border: '1px solid rgba(16, 185, 129, 0.1)',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.08)',
-      }}
-    >
-      <CardContent sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0 }}>
-            <Typography
-              variant="h6"
-              sx={{
-                fontWeight: 700,
-                background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)',
-                backgroundClip: 'text',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                fontSize: '0.95rem',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Data Quality Metrics
-            </Typography>
-            {totalTables > 0 && (
-              <Chip
-                icon={<TrendingUp sx={{ fontSize: 12 }} />}
-                label={totalTables}
-                size="small"
-                sx={{
-                  backgroundColor: '#10b98120',
-                  color: '#10b981',
-                  fontWeight: 600,
-                  fontSize: '0.65rem',
-                  height: '18px',
-                  whiteSpace: 'nowrap',
-                }}
-              />
-            )}
-            {lastFetch && (
-              <Typography 
-                variant="caption" 
-                sx={{ 
-                  color: 'text.secondary', 
-                  fontSize: '0.65rem',
-                  whiteSpace: 'nowrap',
-                  ml: 'auto',
-                  display: { xs: 'none', sm: 'block' },
-                }}
-              >
-                {formatTimeAgo(lastFetch)}
-              </Typography>
-            )}
-          </Box>
-          <IconButton 
-            size="small" 
-            onClick={fetchQuality} 
-            sx={{ 
-              color: '#10b981',
-              ml: 1,
-              padding: '4px',
-              '&:hover': {
-                backgroundColor: '#10b98110',
-              },
+    <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2, height: '100%' }}>
+      <CardContent sx={{ p: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography
+            variant="h6"
+            sx={{
+              fontWeight: 600,
+              color: '#0f172a',
+              fontSize: '1rem',
+            }}
+          >
+            Data Quality
+          </Typography>
+          <IconButton
+            size="small"
+            onClick={fetchQuality}
+            sx={{
+              color: '#6366f1',
+              '&:hover': { backgroundColor: '#f1f5f9' },
             }}
           >
             <Refresh sx={{ fontSize: 18 }} />
           </IconButton>
         </Box>
 
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          {/* Overall Quality Chart */}
-          <Box sx={{ mb: 2 }}>
-            <Box sx={{ width: '100%', height: 140 }}>
-              <ResponsiveContainer>
-                <BarChart data={chartData} margin={{ top: 5, right: 15, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.5} />
-                  <XAxis
-                    dataKey="layer"
-                    stroke="#64748b"
-                    style={{ fontSize: '10px', fontWeight: 600 }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    domain={[0, 100]}
-                    stroke="#64748b"
-                    style={{ fontSize: '10px', fontWeight: 500 }}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value) => `${value}%`}
-                    width={35}
-                  />
-                  <RechartsTooltip
-                    contentStyle={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.98)',
-                      border: '1px solid rgba(16, 185, 129, 0.2)',
-                      borderRadius: 8,
-                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15)',
-                      padding: '8px',
-                    }}
-                    formatter={(value: number) => [`${value.toFixed(2)}%`, 'Quality Score']}
-                  />
-                  <Bar dataKey="score" radius={[4, 4, 0, 0]} animationDuration={1000}>
-                    {chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </Box>
+        {totalTables === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <CheckCircle sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
+            <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+              No quality data available
+            </Typography>
           </Box>
+        ) : (
+          <Grid container spacing={2}>
+            {layers.map((layer) => {
+              const layerData = quality[layer];
+              if (!layerData) return null;
 
-          {/* Layer Quality Details */}
-          <Grid container spacing={1} sx={{ flex: 1, minHeight: 0 }}>
-          {layers.map((layer) => {
-            const layerData = quality[layer];
-            if (!layerData) {
-              // Show placeholder for missing layer data
+              const statusColors = getStatusColor(layerData.overall_status, layerData.average_quality_score);
+              const layerColor = layerColors[layer as keyof typeof layerColors];
+              const topFailingRules = getTopFailingRules(layerData);
+
               return (
-                <Box key={layer} sx={{ mb: 2 }}>
-                  <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
-                    {layer.toUpperCase()} Layer: No data available
-                  </Typography>
-                </Box>
-              );
-            }
-
-            const statusColors = getStatusColor(layerData.overall_status);
-            const layerColor = layerColors[layer as keyof typeof layerColors];
-
-            return (
-              <Grid item xs={12} sm={6} md={4} key={layer}>
-                <Card
-                  sx={{
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    p: 1.25,
-                    background: `linear-gradient(135deg, ${layerColor}08 0%, rgba(255,255,255,0.95) 100%)`,
-                    border: `1.5px solid ${layerColor}30`,
-                    borderRadius: 2,
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    position: 'relative',
-                    overflow: 'hidden',
-                    '&::before': {
-                      content: '""',
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: '2px',
-                      background: `linear-gradient(90deg, ${layerColor} 0%, ${layerColor}80 100%)`,
-                    },
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: `0 6px 12px ${layerColor}40`,
-                      borderColor: layerColor,
-                    },
-                  }}
-                >
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 700, color: layerColor, fontSize: '0.8rem' }}>
-                      {layerNames[layer as keyof typeof layerNames]}
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {getStatusIcon(layerData.overall_status)}
-                      <Typography
-                        variant="h6"
-                        sx={{
-                          fontWeight: 700,
-                          color: statusColors.bg,
-                          fontSize: '0.9rem',
-                        }}
-                      >
-                        {layerData.average_quality_score.toFixed(1)}%
-                      </Typography>
-                    </Box>
-                  </Box>
-
-                  <Box sx={{ mb: 1 }}>
-                    <LinearProgress
-                      variant="determinate"
-                      value={layerData.average_quality_score}
-                      sx={{
-                        height: 6,
-                        borderRadius: 3,
-                        backgroundColor: `${statusColors.bg}20`,
-                        '& .MuiLinearProgress-bar': {
-                          background: `linear-gradient(90deg, ${statusColors.bg} 0%, ${statusColors.bg}80 100%)`,
-                          borderRadius: 3,
-                        },
-                      }}
-                    />
-                  </Box>
-
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, flex: 1, overflowY: 'auto' }}>
-                    {layerData.tables.slice(0, 5).map((table) => {
-                      const tableStatusColors = getStatusColor(table.status);
-                      return (
+                <Grid item xs={12} key={layer}>
+                  <Paper
+                    elevation={0}
+                    sx={{
+                      p: 2.5,
+                      background: '#ffffff',
+                      border: `1px solid ${layerColor}30`,
+                      borderRadius: 1.5,
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        borderColor: layerColor,
+                        boxShadow: `0 2px 8px ${layerColor}20`,
+                      },
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                         <Box
-                          key={table.table}
                           sx={{
-                            p: 1,
-                            borderRadius: 1.25,
-                            backgroundColor: `${tableStatusColors.bg}10`,
-                            border: `1px solid ${tableStatusColors.border}`,
-                            transition: 'all 0.2s',
-                            '&:hover': {
-                              backgroundColor: `${tableStatusColors.bg}20`,
-                              transform: 'translateX(2px)',
-                            },
+                            width: 40,
+                            height: 40,
+                            borderRadius: 1,
+                            background: layerColor,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'white',
+                            fontWeight: 700,
+                            fontSize: '0.875rem',
                           }}
                         >
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.25 }}>
-                            <Typography 
-                              variant="caption" 
-                              sx={{ 
-                                fontWeight: 600, 
-                                color: 'text.primary', 
-                                fontSize: '0.7rem',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                flex: 1,
-                                minWidth: 0,
+                          {layer.charAt(0).toUpperCase()}
+                        </Box>
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.875rem', mb: 0.25 }}>
+                            {layerNames[layer as keyof typeof layerNames]}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                            {layerData.tables.length} datasets
+                          </Typography>
+                        </Box>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
+                        {getStatusIcon(layerData.overall_status)}
+                        <Typography
+                          variant="h6"
+                          sx={{
+                            fontWeight: 600,
+                            color: statusColors.text || statusColors.bg,
+                            fontSize: '1.25rem',
+                            lineHeight: 1,
+                          }}
+                        >
+                          {layerData.average_quality_score.toFixed(1)}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color: statusColors.text || statusColors.bg,
+                            fontSize: '0.75rem',
+                            fontWeight: 500,
+                            opacity: 0.8,
+                          }}
+                        >
+                          %
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    <Divider sx={{ my: 2, borderColor: '#e2e8f0' }} />
+
+                    {/* Top Failing Rules */}
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600, display: 'block', mb: 1.5 }}>
+                        Top Failing Rules
+                      </Typography>
+                      {topFailingRules.length > 0 ? (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          {topFailingRules.map((rule, index) => (
+                            <Box
+                              key={index}
+                              sx={{
+                                p: 1.5,
+                                borderRadius: 1,
+                                background: index === 0 ? '#fffbeb' : '#f8fafc',
+                                border: `1px solid ${index === 0 ? '#fde68a' : '#e2e8f0'}`,
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
                               }}
                             >
-                              {table.table}
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 0.5 }}>
-                              {getStatusIcon(table.status)}
-                              <Typography variant="caption" sx={{ fontWeight: 700, color: tableStatusColors.bg, fontSize: '0.65rem' }}>
-                                {table.quality_score.toFixed(1)}%
+                              <Typography 
+                                variant="body2" 
+                                sx={{ 
+                                  color: '#0f172a', 
+                                  fontSize: index === 0 ? '0.875rem' : '0.8125rem', 
+                                  fontWeight: index === 0 ? 600 : 500,
+                                }}
+                              >
+                                {rule.name}
                               </Typography>
+                              <Chip
+                                label={rule.count}
+                                size="small"
+                                sx={{
+                                  backgroundColor: '#fef3c7',
+                                  color: '#92400e',
+                                  fontWeight: 500,
+                                  fontSize: '0.6875rem',
+                                  height: '20px',
+                                  border: '1px solid #fde68a',
+                                }}
+                              />
                             </Box>
-                          </Box>
-                          <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
-                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
-                              {table.row_count.toLocaleString()} rows
-                            </Typography>
-                            {table.dead_rows > 0 && (
-                              <Typography variant="caption" sx={{ color: '#ef4444', fontSize: '0.6rem' }}>
-                                {table.dead_rows.toLocaleString()} dead
-                              </Typography>
-                            )}
-                          </Box>
+                          ))}
                         </Box>
-                      );
-                    })}
-                  </Box>
-                </Card>
-              </Grid>
-            );
-          })}
+                      ) : (
+                        <Box sx={{ textAlign: 'center', py: 2 }}>
+                          <CheckCircle sx={{ fontSize: 24, color: '#10b981', mb: 1 }} />
+                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                            No failing rules detected
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
+                  </Paper>
+                </Grid>
+              );
+            })}
           </Grid>
-        </Box>
+        )}
       </CardContent>
     </Card>
   );

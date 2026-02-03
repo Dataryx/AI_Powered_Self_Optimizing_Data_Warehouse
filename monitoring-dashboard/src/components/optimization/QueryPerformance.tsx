@@ -1,32 +1,31 @@
 /**
- * Query Performance Component
- * Displays query performance metrics and analysis
+ * Query Performance Analysis Component
+ * Execution time analysis with baseline explanation - Advisory only
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { 
-  Card, 
-  CardContent, 
-  Typography, 
-  Box, 
+import {
+  Card,
+  CardContent,
+  Typography,
+  Box,
   Chip,
-  IconButton,
-  Tooltip,
   Select,
   MenuItem,
   FormControl,
   InputLabel,
+  Paper,
 } from '@mui/material';
-import { Refresh, Speed, TrendingUp, TrendingDown } from '@mui/icons-material';
+import { Speed, TrendingUp, Info } from '@mui/icons-material';
 import {
-  BarChart,
-  Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
-  Cell,
+  ReferenceLine,
 } from 'recharts';
 import { apiService } from '../../services/api';
 
@@ -47,10 +46,11 @@ interface QueryPerformanceProps {
   refreshKey?: number;
 }
 
-export const QueryPerformance: React.FC<QueryPerformanceProps> = ({ refreshKey = 0 }) => {
+export const QueryPerformance: React.FC<QueryPerformanceProps> = ({
+  refreshKey = 0,
+}) => {
   const [metrics, setMetrics] = useState<QueryMetric[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [timeRange, setTimeRange] = useState('7');
 
   const fetchMetrics = useCallback(async () => {
@@ -58,18 +58,18 @@ export const QueryPerformance: React.FC<QueryPerformanceProps> = ({ refreshKey =
       const endDate = new Date();
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - parseInt(timeRange));
-      
+
       const data = await apiService.getQueryPerformance(
         startDate.toISOString().split('T')[0],
         endDate.toISOString().split('T')[0],
         undefined,
         100
       );
-      setMetrics(data.metrics || []);
-      setLastUpdate(new Date());
+      setMetrics(data.metrics || data.data?.metrics || []);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching query performance:', err);
+      setMetrics([]);
       setLoading(false);
     }
   }, [timeRange]);
@@ -80,190 +80,314 @@ export const QueryPerformance: React.FC<QueryPerformanceProps> = ({ refreshKey =
     return () => clearInterval(interval);
   }, [fetchMetrics, refreshKey]);
 
-  const chartData = metrics.slice(0, 10).map((metric) => ({
-    name: metric.query_id.substring(0, 8) + '...',
-    avg: metric.avg_execution_time,
-    p95: metric.p95_execution_time,
-    p99: metric.p99_execution_time,
-  }));
+  // Calculate baseline (rolling median)
+  const calculateBaseline = () => {
+    if (metrics.length === 0) return 0;
+    const sorted = [...metrics]
+      .map((m) => m.avg_execution_time)
+      .sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+      ? (sorted[mid - 1] + sorted[mid]) / 2
+      : sorted[mid];
+  };
 
-  const avgExecutionTime = metrics.length > 0
-    ? metrics.reduce((sum, m) => sum + m.avg_execution_time, 0) / metrics.length
-    : 0;
+  // Prepare trend data (last 10 queries by execution time)
+  const trendData = metrics
+    .slice(0, 10)
+    .map((metric, index) => ({
+      name: `Q${index + 1}`,
+      avg: metric.avg_execution_time,
+      p50: metric.p50_execution_time,
+      baseline: calculateBaseline(),
+    }))
+    .reverse();
 
-  if (loading && metrics.length === 0) {
-    return (
-      <Card sx={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)' }}>
-        <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography>Loading query performance...</Typography>
-        </CardContent>
-      </Card>
-    );
-  }
+  const baseline = calculateBaseline();
+  const avgExecutionTime =
+    metrics.length > 0
+      ? metrics.reduce((sum, m) => sum + m.avg_execution_time, 0) / metrics.length
+      : 0;
 
   return (
     <Card
+      elevation={0}
       sx={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(236, 72, 153, 0.2)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-        height: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-        maxHeight: '600px',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: '4px',
-          background: 'linear-gradient(90deg, #ec4899 0%, #f59e0b 50%, #10b981 100%)',
-        },
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 2,
       }}
     >
-      <CardContent sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <CardContent sx={{ p: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Box
               sx={{
-                p: 0.75,
+                p: 1,
                 borderRadius: 1.5,
-                background: 'linear-gradient(135deg, #ec4899 0%, #f59e0b 100%)',
+                background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <Speed sx={{ fontSize: 18, color: 'white' }} />
+              <Speed sx={{ color: 'white', fontSize: 20 }} />
             </Box>
             <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Query Performance
+              <Typography
+                variant="h6"
+                sx={{
+                  fontWeight: 600,
+                  color: '#0f172a',
+                  fontSize: '1rem',
+                  mb: 0.25,
+                }}
+              >
+                Query Performance Analysis
               </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+              <Typography
+                variant="caption"
+                sx={{ color: '#64748b', fontSize: '0.75rem' }}
+              >
                 Execution time analysis
               </Typography>
             </Box>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <FormControl size="small" sx={{ minWidth: 100 }}>
-              <InputLabel sx={{ fontSize: '0.7rem' }}>Range</InputLabel>
-              <Select
-                value={timeRange}
-                label="Range"
-                onChange={(e) => setTimeRange(e.target.value)}
-                sx={{ fontSize: '0.75rem', height: '28px' }}
-              >
-                <MenuItem value="7">7 days</MenuItem>
-                <MenuItem value="30">30 days</MenuItem>
-                <MenuItem value="90">90 days</MenuItem>
-              </Select>
-            </FormControl>
-            <Chip
-              label={metrics.length}
-              size="small"
+
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel sx={{ fontSize: '0.75rem' }}>Time Range</InputLabel>
+            <Select
+              value={timeRange}
+              label="Time Range"
+              onChange={(e) => setTimeRange(e.target.value)}
               sx={{
-                backgroundColor: 'rgba(236, 72, 153, 0.1)',
-                color: '#ec4899',
-                fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
-              }}
-            />
-            <IconButton
-              onClick={fetchMetrics}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(236, 72, 153, 0.1)',
-                color: '#ec4899',
-                '&:hover': {
-                  backgroundColor: 'rgba(236, 72, 153, 0.2)',
-                  transform: 'rotate(180deg)',
+                fontSize: '0.875rem',
+                '& .MuiOutlinedInput-notchedOutline': {
+                  borderColor: '#e2e8f0',
                 },
-                transition: 'all 0.3s',
-                width: 28,
-                height: 28,
               }}
             >
-              <Refresh sx={{ fontSize: 14 }} />
-            </IconButton>
-          </Box>
+              <MenuItem value="7">Last 7 days</MenuItem>
+              <MenuItem value="30">Last 30 days</MenuItem>
+              <MenuItem value="90">Last 90 days</MenuItem>
+            </Select>
+          </FormControl>
         </Box>
 
-        {/* Stats */}
-        {metrics.length > 0 && (
-          <Box sx={{ display: 'flex', gap: 1, mb: 1.5 }}>
-            <Chip
-              icon={<TrendingUp sx={{ fontSize: 12 }} />}
-              label={`Avg: ${avgExecutionTime.toFixed(2)}s`}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                color: '#10b981',
-                fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
-              }}
-            />
-            <Chip
-              label={`${metrics.length} queries`}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                color: '#6366f1',
-                fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
-              }}
-            />
-          </Box>
-        )}
-
-        {/* Chart */}
-        {chartData.length > 0 ? (
-          <Box sx={{ flex: 1, minHeight: 0 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
-                <XAxis 
-                  dataKey="name" 
-                  tick={{ fontSize: 10 }}
-                  stroke="#64748b"
-                />
-                <YAxis 
-                  tick={{ fontSize: 10 }}
-                  stroke="#64748b"
-                  label={{ value: 'Time (s)', angle: -90, position: 'insideLeft', fontSize: 10 }}
-                />
-                <RechartsTooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                    border: '1px solid rgba(0, 0, 0, 0.1)',
-                    borderRadius: '8px',
-                    fontSize: '0.75rem',
-                  }}
-                />
-                <Bar dataKey="avg" fill="#6366f1" radius={[4, 4, 0, 0]}>
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#6366f1' : '#8b5cf6'} />
-                  ))}
-                </Bar>
-                <Bar dataKey="p95" fill="#ec4899" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Box>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              No query performance data available
+        {loading ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <Typography variant="body2" sx={{ color: '#64748b' }}>
+              Loading query performance data...
             </Typography>
           </Box>
+        ) : metrics.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <Speed sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
+            <Typography
+              variant="body2"
+              sx={{ color: '#64748b', fontSize: '0.875rem', mb: 0.5 }}
+            >
+              No query performance data available
+            </Typography>
+            <Paper
+              elevation={0}
+              sx={{
+                mt: 2,
+                p: 2,
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 1.5,
+                maxWidth: '500px',
+                mx: 'auto',
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                <Info sx={{ fontSize: 18, color: '#6366f1', mt: 0.25 }} />
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: '#64748b',
+                    fontSize: '0.75rem',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Baseline derived from rolling median of historical executions
+                </Typography>
+              </Box>
+            </Paper>
+          </Box>
+        ) : (
+          <>
+            {/* Summary Stats */}
+            <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 1.5,
+                  flex: 1,
+                  minWidth: '150px',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 1.5,
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  sx={{ color: '#64748b', display: 'block', mb: 0.5, fontSize: '0.75rem' }}
+                >
+                  Average Execution Time
+                </Typography>
+                <Typography
+                  variant="h6"
+                  sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.125rem' }}
+                >
+                  {avgExecutionTime.toFixed(3)}s
+                </Typography>
+              </Paper>
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 1.5,
+                  flex: 1,
+                  minWidth: '150px',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 1.5,
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  sx={{ color: '#64748b', display: 'block', mb: 0.5, fontSize: '0.75rem' }}
+                >
+                  Baseline (Median)
+                </Typography>
+                <Typography
+                  variant="h6"
+                  sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.125rem' }}
+                >
+                  {baseline.toFixed(3)}s
+                </Typography>
+              </Paper>
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 1.5,
+                  flex: 1,
+                  minWidth: '150px',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 1.5,
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  sx={{ color: '#64748b', display: 'block', mb: 0.5, fontSize: '0.75rem' }}
+                >
+                  Total Queries
+                </Typography>
+                <Typography
+                  variant="h6"
+                  sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.125rem' }}
+                >
+                  {metrics.length}
+                </Typography>
+              </Paper>
+            </Box>
+
+            {/* Trend Chart */}
+            {trendData.length > 0 && (
+              <Box sx={{ mb: 2 }}>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: '#64748b',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    display: 'block',
+                    mb: 1.5,
+                  }}
+                >
+                  Execution Time Trends (Top 10 Queries)
+                </Typography>
+                <Box sx={{ width: '100%', height: 250 }}>
+                  <ResponsiveContainer>
+                    <LineChart data={trendData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.5} />
+                      <XAxis
+                        dataKey="name"
+                        stroke="#64748b"
+                        style={{ fontSize: '10px' }}
+                      />
+                      <YAxis
+                        stroke="#64748b"
+                        style={{ fontSize: '10px' }}
+                        label={{ value: 'Time (s)', angle: -90, position: 'insideLeft', fontSize: '10px' }}
+                      />
+                      <RechartsTooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(255, 255, 255, 0.98)',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 8,
+                          fontSize: '12px',
+                        }}
+                      />
+                      <ReferenceLine
+                        y={baseline}
+                        stroke="#94a3b8"
+                        strokeDasharray="5 5"
+                        label={{ value: 'Baseline', position: 'right', fontSize: '10px', fill: '#64748b' }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="avg"
+                        stroke="#6366f1"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        name="Avg Execution"
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="p50"
+                        stroke="#10b981"
+                        strokeWidth={1.5}
+                        strokeDasharray="3 3"
+                        dot={{ r: 2 }}
+                        name="P50"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Box>
+            )}
+
+            {/* Baseline Explanation */}
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2,
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 1.5,
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                <Info sx={{ fontSize: 18, color: '#6366f1', mt: 0.25 }} />
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: '#64748b',
+                    fontSize: '0.75rem',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Baseline derived from rolling median of historical executions. This provides a
+                  stable reference point for identifying performance regressions and improvements.
+                </Typography>
+              </Box>
+            </Paper>
+          </>
         )}
       </CardContent>
     </Card>
   );
 };
-

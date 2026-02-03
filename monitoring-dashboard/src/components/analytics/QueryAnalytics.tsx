@@ -57,6 +57,24 @@ export const QueryAnalytics: React.FC<QueryAnalyticsProps> = ({ refreshKey = 0 }
       // Process data for charts
       const metrics = data.metrics || [];
       const slowQueries = metrics.filter((m: any) => m.avg_execution_time > 1).slice(0, 5);
+
+      // Approximate execution cost using total_execution_time when available, otherwise avg * count
+      const withCost = metrics.map((m: any) => ({
+        ...m,
+        _cost:
+          (typeof m.total_execution_time === 'number' && m.total_execution_time > 0)
+            ? m.total_execution_time
+            : (Number(m.avg_execution_time || 0) * Number(m.execution_count || 0)),
+      }));
+
+      const mostExpensive = withCost
+        .filter((m: any) => m._cost > 0)
+        .sort((a: any, b: any) => b._cost - a._cost)
+        .slice(0, 5)
+        .map((m: any, idx: number) => ({
+          name: m.query_id ? m.query_id.substring(0, 8) : `Query ${idx + 1}`,
+          cost: m._cost,
+        }));
       
       setAnalytics({
         totalQueries: metrics.length,
@@ -70,6 +88,7 @@ export const QueryAnalytics: React.FC<QueryAnalyticsProps> = ({ refreshKey = 0 }
           value: m.execution_count,
           time: m.avg_execution_time,
         })),
+        mostExpensiveQueries: mostExpensive,
       });
       setLastUpdate(new Date());
       setLoading(false);
@@ -135,10 +154,21 @@ export const QueryAnalytics: React.FC<QueryAnalyticsProps> = ({ refreshKey = 0 }
             </Box>
             <Box>
               <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Query Analytics
+                Query Performance Impact
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Query distribution and performance
+                Impact of workload on query performance
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#94a3b8',
+                  fontSize: '0.7rem',
+                  display: 'block',
+                  mt: 0.25,
+                }}
+              >
+                Compared to pre-optimization baseline.
               </Typography>
             </Box>
           </Box>
@@ -230,27 +260,37 @@ export const QueryAnalytics: React.FC<QueryAnalyticsProps> = ({ refreshKey = 0 }
             </Box>
             <Box>
               <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', mb: 0.5, display: 'block' }}>
-                Execution Time
+                Most Expensive Queries (Execution Cost)
               </Typography>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={analytics.queryDistribution}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} stroke="#64748b" />
-                  <YAxis tick={{ fontSize: 10 }} stroke="#64748b" />
-                  <RechartsTooltip />
-                  <Bar dataKey="time" fill="#6366f1" radius={[4, 4, 0, 0]}>
-                    {analytics.queryDistribution.map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              {analytics.mostExpensiveQueries && analytics.mostExpensiveQueries.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={analytics.mostExpensiveQueries}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
+                    <XAxis dataKey="name" tick={{ fontSize: 10 }} stroke="#64748b" />
+                    <YAxis tick={{ fontSize: 10 }} stroke="#64748b" />
+                    <RechartsTooltip
+                      formatter={(value: number) => [`${value.toFixed(2)} cost units`, 'Execution Cost']}
+                    />
+                    <Bar dataKey="cost" fill="#6366f1" radius={[4, 4, 0, 0]}>
+                      {analytics.mostExpensiveQueries.map((entry: any, index: number) => (
+                        <Cell key={`cell-exp-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <Box sx={{ textAlign: 'center', py: 2 }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    No cost data available
+                  </Typography>
+                </Box>
+              )}
             </Box>
           </Box>
         ) : (
           <Box sx={{ textAlign: 'center', py: 4, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              No query analytics data available
+              Analytics will populate after sufficient workload execution.
             </Typography>
           </Box>
         )}

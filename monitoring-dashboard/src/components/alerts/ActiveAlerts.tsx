@@ -1,6 +1,6 @@
 /**
  * Active Alerts Component
- * Displays active alerts with severity and actions
+ * Displays active alerts with severity and source information
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -11,12 +11,9 @@ import {
   Box, 
   Chip,
   IconButton,
-  Button,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  Divider,
 } from '@mui/material';
-import { Refresh, Warning, Error as ErrorIcon, Info, CheckCircle, ExpandMore, Check } from '@mui/icons-material';
+import { Refresh, Warning, Error as ErrorIcon, Info, CheckCircle } from '@mui/icons-material';
 import { apiService } from '../../services/api';
 
 interface Alert {
@@ -28,6 +25,7 @@ interface Alert {
   timestamp: string;
   status: string;
   acknowledged?: boolean;
+  source?: string;
 }
 
 interface ActiveAlertsProps {
@@ -37,14 +35,11 @@ interface ActiveAlertsProps {
 export const ActiveAlerts: React.FC<ActiveAlertsProps> = ({ refreshKey = 0 }) => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const [acknowledging, setAcknowledging] = useState<string | null>(null);
 
   const fetchAlerts = useCallback(async () => {
     try {
       const data = await apiService.getActiveAlerts();
       setAlerts(data.alerts || data || []);
-      setLastUpdate(new Date());
       setLoading(false);
     } catch (err) {
       console.error('Error fetching active alerts:', err);
@@ -58,251 +53,144 @@ export const ActiveAlerts: React.FC<ActiveAlertsProps> = ({ refreshKey = 0 }) =>
     return () => clearInterval(interval);
   }, [fetchAlerts, refreshKey]);
 
-  const handleAcknowledge = async (alertId: string) => {
-    setAcknowledging(alertId);
-    try {
-      await apiService.acknowledgeAlert(alertId);
-      await fetchAlerts();
-    } catch (err) {
-      console.error('Error acknowledging alert:', err);
-    } finally {
-      setAcknowledging(null);
-    }
-  };
-
   const getSeverityColor = (severity: string) => {
     switch (severity?.toLowerCase()) {
       case 'critical':
-        return { bg: '#ef4444', light: '#ef444420', border: '#ef444440', icon: ErrorIcon };
       case 'high':
-        return { bg: '#f59e0b', light: '#f59e0b20', border: '#f59e0b40', icon: Warning };
+        return { bg: '#ef4444', light: 'rgba(239, 68, 68, 0.08)', border: 'rgba(239, 68, 68, 0.2)', icon: ErrorIcon };
       case 'medium':
-        return { bg: '#3b82f6', light: '#3b82f620', border: '#3b82f640', icon: Info };
+        return { bg: '#f59e0b', light: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245, 158, 11, 0.2)', icon: Warning };
       case 'low':
-      case 'warning':
-        return { bg: '#10b981', light: '#10b98120', border: '#10b98140', icon: CheckCircle };
+        return { bg: '#3b82f6', light: 'rgba(59, 130, 246, 0.08)', border: 'rgba(59, 130, 246, 0.2)', icon: Info };
       default:
-        return { bg: '#64748b', light: '#64748b20', border: '#64748b40', icon: Info };
+        return { bg: '#64748b', light: 'rgba(100, 116, 139, 0.08)', border: 'rgba(100, 116, 139, 0.2)', icon: Info };
     }
   };
 
-  const criticalCount = alerts.filter(a => a.severity?.toLowerCase() === 'critical').length;
-  const highCount = alerts.filter(a => a.severity?.toLowerCase() === 'high').length;
+  const getSourceLabel = (type: string, source?: string) => {
+    if (source) return source;
+    // Infer source from type
+    const typeLower = type?.toLowerCase() || '';
+    if (typeLower.includes('etl') || typeLower.includes('pipeline')) return 'ETL';
+    if (typeLower.includes('query') || typeLower.includes('performance')) return 'Query Performance';
+    if (typeLower.includes('resource') || typeLower.includes('storage')) return 'Resource Usage';
+    if (typeLower.includes('freshness') || typeLower.includes('data quality')) return 'Data Freshness';
+    return 'System';
+  };
 
   if (loading && alerts.length === 0) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)' }}>
-        <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography>Loading active alerts...</Typography>
+      <Card sx={{ boxShadow: 1, border: '1px solid', borderColor: 'divider' }}>
+        <CardContent sx={{ p: 2, textAlign: 'center' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Loading active alerts...
+          </Typography>
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card
-      sx={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(239, 68, 68, 0.2)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-        height: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-        maxHeight: '600px',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: '4px',
-          background: 'linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #3b82f6 100%)',
-        },
-      }}
-    >
-      <CardContent sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Card sx={{ boxShadow: 1, border: '1px solid', borderColor: 'divider' }}>
+      <CardContent sx={{ p: 2 }}>
         {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box
-              sx={{
-                p: 0.75,
-                borderRadius: 1.5,
-                background: 'linear-gradient(135deg, #ef4444 0%, #f59e0b 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Warning sx={{ fontSize: 18, color: 'white' }} />
-            </Box>
-            <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Active Alerts
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Real-time alert monitoring
-              </Typography>
-            </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1rem', mb: 0.5 }}>
+              Active Alerts
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+              Alerts are generated from ETL, query, and resource telemetry.
+            </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {criticalCount > 0 && (
-              <Chip
-                label={criticalCount}
-                size="small"
-                sx={{
-                  backgroundColor: '#ef4444',
-                  color: 'white',
-                  fontWeight: 600,
-                  fontSize: '0.7rem',
-                  height: '20px',
-                }}
-              />
-            )}
-            {highCount > 0 && (
-              <Chip
-                label={highCount}
-                size="small"
-                sx={{
-                  backgroundColor: '#f59e0b',
-                  color: 'white',
-                  fontWeight: 600,
-                  fontSize: '0.7rem',
-                  height: '20px',
-                }}
-              />
-            )}
-            <Chip
-              label={alerts.length}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                color: '#ef4444',
-                fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
-              }}
-            />
-            <IconButton
-              onClick={fetchAlerts}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                color: '#ef4444',
-                '&:hover': {
-                  backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                  transform: 'rotate(180deg)',
-                },
-                transition: 'all 0.3s',
-                width: 28,
-                height: 28,
-              }}
-            >
-              <Refresh sx={{ fontSize: 14 }} />
-            </IconButton>
-          </Box>
+          <IconButton
+            onClick={fetchAlerts}
+            size="small"
+            sx={{
+              color: 'text.secondary',
+              '&:hover': {
+                backgroundColor: 'action.hover',
+                transform: 'rotate(180deg)',
+              },
+              transition: 'all 0.3s',
+            }}
+          >
+            <Refresh fontSize="small" />
+          </IconButton>
         </Box>
 
-        {/* Alerts List */}
+        <Divider sx={{ mb: 2 }} />
+
+        {/* Alerts List or Empty State */}
         {alerts.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Box>
-              <CheckCircle sx={{ fontSize: 48, color: '#10b981', opacity: 0.5, mb: 1 }} />
-              <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-                All Clear!
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                No active alerts
-              </Typography>
-            </Box>
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <CheckCircle sx={{ fontSize: 48, color: '#10b981', opacity: 0.3, mb: 1.5 }} />
+            <Typography variant="body1" sx={{ fontWeight: 500, color: 'text.primary', mb: 0.5 }}>
+              All Clear — No active alerts
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+              System is operating normally
+            </Typography>
           </Box>
         ) : (
-          <Box sx={{ flex: 1, overflowY: 'auto', pb: 0.5 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             {alerts.map((alert) => {
               const severityColors = getSeverityColor(alert.severity);
               const SeverityIcon = severityColors.icon;
+              const source = getSourceLabel(alert.type, alert.source);
 
               return (
-                <Accordion
+                <Box
                   key={alert.alert_id}
                   sx={{
-                    mb: 1,
+                    p: 1.5,
+                    borderRadius: 1,
                     border: `1px solid ${severityColors.border}`,
-                    background: severityColors.light,
-                    '&:before': { display: 'none' },
-                    boxShadow: 'none',
+                    backgroundColor: severityColors.light,
                   }}
                 >
-                  <AccordionSummary
-                    expandIcon={<ExpandMore sx={{ fontSize: 18, color: severityColors.bg }} />}
-                    sx={{ minHeight: '48px !important', py: 0.5 }}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                      <SeverityIcon sx={{ fontSize: 18, color: severityColors.bg }} />
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flex: 1 }}>
+                      <SeverityIcon sx={{ fontSize: 18, color: severityColors.bg, mt: 0.25 }} />
                       <Box sx={{ flex: 1 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.875rem', mb: 0.5 }}>
                           {alert.title}
                         </Typography>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                          {new Date(alert.timestamp).toLocaleString()}
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+                          {alert.message}
                         </Typography>
                       </Box>
-                      <Chip
-                        label={alert.severity}
-                        size="small"
-                        sx={{
-                          height: '18px',
-                          fontSize: '0.65rem',
-                          backgroundColor: severityColors.bg,
-                          color: 'white',
-                          fontWeight: 600,
-                        }}
-                      />
                     </Box>
-                  </AccordionSummary>
-                  <AccordionDetails sx={{ pt: 0 }}>
-                    <Typography variant="body2" sx={{ fontSize: '0.8rem', mb: 1.5, color: 'text.secondary' }}>
-                      {alert.message}
+                    <Chip
+                      label={alert.severity}
+                      size="small"
+                      sx={{
+                        height: '20px',
+                        fontSize: '0.7rem',
+                        backgroundColor: severityColors.bg,
+                        color: 'white',
+                        fontWeight: 500,
+                        ml: 1,
+                      }}
+                    />
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 1 }}>
+                    <Chip
+                      label={source}
+                      size="small"
+                      sx={{
+                        height: '20px',
+                        fontSize: '0.7rem',
+                        backgroundColor: 'action.selected',
+                        color: 'text.secondary',
+                        fontWeight: 400,
+                      }}
+                    />
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', ml: 'auto' }}>
+                      {new Date(alert.timestamp).toLocaleString()}
                     </Typography>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Chip
-                        label={alert.type}
-                        size="small"
-                        sx={{
-                          height: '18px',
-                          fontSize: '0.65rem',
-                          backgroundColor: 'rgba(0, 0, 0, 0.05)',
-                          color: 'text.secondary',
-                        }}
-                      />
-                      {!alert.acknowledged && (
-                        <Button
-                          size="small"
-                          variant="contained"
-                          startIcon={<Check sx={{ fontSize: 14 }} />}
-                          onClick={() => handleAcknowledge(alert.alert_id)}
-                          disabled={acknowledging === alert.alert_id}
-                          sx={{
-                            backgroundColor: severityColors.bg,
-                            color: 'white',
-                            fontSize: '0.7rem',
-                            px: 1.5,
-                            py: 0.25,
-                            minWidth: 'auto',
-                            height: '24px',
-                            '&:hover': {
-                              backgroundColor: severityColors.bg,
-                              opacity: 0.9,
-                            },
-                          }}
-                        >
-                          {acknowledging === alert.alert_id ? 'Acknowledging...' : 'Acknowledge'}
-                        </Button>
-                      )}
-                    </Box>
-                  </AccordionDetails>
-                </Accordion>
+                  </Box>
+                </Box>
               );
             })}
           </Box>
@@ -311,4 +199,3 @@ export const ActiveAlerts: React.FC<ActiveAlertsProps> = ({ refreshKey = 0 }) =>
     </Card>
   );
 };
-

@@ -113,7 +113,7 @@ export const UsageAnalytics: React.FC<UsageAnalyticsProps> = ({ refreshKey = 0 }
         height: '100%',
         position: 'relative',
         overflow: 'hidden',
-        maxHeight: '600px',
+        maxHeight: '520px',
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -125,7 +125,7 @@ export const UsageAnalytics: React.FC<UsageAnalyticsProps> = ({ refreshKey = 0 }
         },
       }}
     >
-      <CardContent sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -143,10 +143,10 @@ export const UsageAnalytics: React.FC<UsageAnalyticsProps> = ({ refreshKey = 0 }
             </Box>
             <Box>
               <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Usage Analytics
+                Workload & Access Patterns
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Usage patterns and top tables
+                How workloads access layers and tables
               </Typography>
             </Box>
           </Box>
@@ -200,12 +200,21 @@ export const UsageAnalytics: React.FC<UsageAnalyticsProps> = ({ refreshKey = 0 }
 
         {/* Charts */}
         {analytics && analytics.hourlyUsage && analytics.hourlyUsage.length > 0 ? (
-          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-            <Box sx={{ flex: 1, minHeight: 0 }}>
+          <Box
+            sx={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 1.5,
+              py: 0.5,
+            }}
+          >
+            <Box sx={{ flex: 1, minHeight: 0, px: 0.5 }}>
               <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', mb: 0.5, display: 'block' }}>
                 Hourly Usage Pattern
               </Typography>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="85%">
                 <AreaChart data={analytics.hourlyUsage}>
                   <defs>
                     <linearGradient id="colorQueries" x1="0" y1="0" x2="0" y2="1">
@@ -221,11 +230,11 @@ export const UsageAnalytics: React.FC<UsageAnalyticsProps> = ({ refreshKey = 0 }
                 </AreaChart>
               </ResponsiveContainer>
             </Box>
-            <Box sx={{ height: '40%', minHeight: 0 }}>
+            <Box sx={{ height: '40%', minHeight: 0, px: 0.5, pb: 0.5 }}>
               <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', mb: 0.5, display: 'block' }}>
                 Top Tables by Size
               </Typography>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="85%">
                 <BarChart data={analytics.topTables}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
                   <XAxis dataKey="table" tick={{ fontSize: 9 }} stroke="#64748b" angle={-45} textAnchor="end" height={60} />

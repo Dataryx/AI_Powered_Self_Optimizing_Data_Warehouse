@@ -1,50 +1,89 @@
 /**
  * Partition Recommendations Component
- * Displays partition optimization recommendations
+ * ML-generated partitioning suggestions - Advisory only
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { 
-  Card, 
-  CardContent, 
-  Typography, 
-  Box, 
+import {
+  Card,
+  CardContent,
+  Typography,
+  Box,
   Chip,
-  IconButton,
-  Tooltip,
+  Paper,
 } from '@mui/material';
-import { Refresh, TableChart, TrendingUp, CheckCircle, Warning } from '@mui/icons-material';
+import { TableChart, TrendingDown, TrendingUp, CheckCircle } from '@mui/icons-material';
 import { apiService } from '../../services/api';
 
 interface Recommendation {
   recommendation_id: string;
   type: string;
   table: string;
-  columns: string[];
-  estimated_improvement: number;
-  cost: number;
-  priority: string;
-  status: string;
-  created_at: string;
+  partition_column?: string;
+  estimated_improvement?: number;
+  cost?: number;
+  priority?: string;
+  status?: string;
+  created_at?: string;
+  impact?: {
+    latency?: 'decrease' | 'increase';
+    cost?: 'decrease' | 'increase';
+    storage?: 'increase';
+  };
+  explanation?: string;
 }
 
 interface PartitionRecommendationsProps {
   refreshKey?: number;
 }
 
-export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> = ({ refreshKey = 0 }) => {
+export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> = ({
+  refreshKey = 0,
+}) => {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+
+  const buildRationaleLine = (rec: Recommendation) => {
+    const explanation = rec.explanation?.trim();
+    const triggerFromExplanation =
+      explanation && explanation.length > 0
+        ? explanation.split('.').shift()?.trim()
+        : undefined;
+
+    const trigger =
+      triggerFromExplanation ||
+      (rec.priority?.toLowerCase() === 'high'
+        ? 'High latency due to wide scans'
+        : rec.priority?.toLowerCase() === 'medium'
+          ? 'Scan pruning opportunity detected'
+          : 'Frequent range filters detected');
+
+    const anyRec = rec as any;
+    const windowDays =
+      anyRec.observation_window_days ??
+      anyRec.window_days ??
+      anyRec.lookback_days ??
+      undefined;
+    const windowQueries = anyRec.query_count ?? anyRec.window_queries ?? anyRec.lookback_queries ?? undefined;
+
+    const windowLabel =
+      typeof windowDays === 'number'
+        ? `last ${windowDays} days`
+        : typeof windowQueries === 'number'
+          ? `last ${windowQueries} queries`
+          : 'recent executions';
+
+    return `Why: ${trigger} • Window: ${windowLabel}` as const;
+  };
 
   const fetchRecommendations = useCallback(async () => {
     try {
       const data = await apiService.getOptimizationRecommendations('partition', 'pending');
-      setRecommendations(data.recommendations || []);
-      setLastUpdate(new Date());
+      setRecommendations(data.recommendations || data.data?.recommendations || []);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching partition recommendations:', err);
+      setRecommendations([]);
       setLoading(false);
     }
   }, []);
@@ -55,178 +94,262 @@ export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> =
     return () => clearInterval(interval);
   }, [fetchRecommendations, refreshKey]);
 
-  if (loading && recommendations.length === 0) {
-    return (
-      <Card sx={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)' }}>
-        <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography>Loading partition recommendations...</Typography>
-        </CardContent>
-      </Card>
-    );
-  }
+  const getSeverityColor = (priority?: string) => {
+    switch (priority?.toLowerCase()) {
+      case 'high':
+        return { bg: '#ef4444', light: '#fef2f2', text: '#991b1b' };
+      case 'medium':
+        return { bg: '#f59e0b', light: '#fef3c7', text: '#92400e' };
+      case 'low':
+        return { bg: '#6366f1', light: '#e0e7ff', text: '#4338ca' };
+      default:
+        return { bg: '#64748b', light: '#f1f5f9', text: '#475569' };
+    }
+  };
 
   return (
     <Card
+      elevation={0}
       sx={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(139, 92, 246, 0.2)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 2,
         height: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-        maxHeight: '600px',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: '4px',
-          background: 'linear-gradient(90deg, #8b5cf6 0%, #ec4899 50%, #f59e0b 100%)',
-        },
       }}
     >
-      <CardContent sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box
-              sx={{
-                p: 0.75,
-                borderRadius: 1.5,
-                background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <TableChart sx={{ fontSize: 18, color: 'white' }} />
-            </Box>
-            <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.2 }}>
-                Partition Recommendations
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Table partitioning suggestions
-              </Typography>
-            </Box>
+      <CardContent sx={{ p: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
+          <Box
+            sx={{
+              p: 1,
+              borderRadius: 1.5,
+              background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <TableChart sx={{ color: 'white', fontSize: 20 }} />
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Chip
-              label={recommendations.length}
-              size="small"
+          <Box sx={{ flex: 1 }}>
+            <Typography
+              variant="h6"
               sx={{
-                backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                color: '#8b5cf6',
                 fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
-              }}
-            />
-            <IconButton
-              onClick={fetchRecommendations}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                color: '#8b5cf6',
-                '&:hover': {
-                  backgroundColor: 'rgba(139, 92, 246, 0.2)',
-                  transform: 'rotate(180deg)',
-                },
-                transition: 'all 0.3s',
-                width: 28,
-                height: 28,
+                color: '#0f172a',
+                fontSize: '1rem',
+                mb: 0.25,
               }}
             >
-              <Refresh sx={{ fontSize: 14 }} />
-            </IconButton>
+              Partition Recommendations
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{ color: '#64748b', fontSize: '0.75rem' }}
+            >
+              Partitioning suggestions for optimal performance
+            </Typography>
           </Box>
         </Box>
 
-        {/* Recommendations List */}
-        {recommendations.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Box>
-              <CheckCircle sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.5, mb: 1 }} />
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                No partition recommendations available
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                All tables are optimally partitioned
-              </Typography>
-            </Box>
+        {loading ? (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Typography variant="body2" sx={{ color: '#64748b' }}>
+              Loading recommendations...
+            </Typography>
+          </Box>
+        ) : recommendations.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <CheckCircle sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
+            <Typography
+              variant="body2"
+              sx={{ color: '#64748b', fontSize: '0.875rem', mb: 0.5 }}
+            >
+              No partition recommendations available
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{ color: '#94a3b8', fontSize: '0.75rem' }}
+            >
+              All tables are optimally partitioned
+            </Typography>
           </Box>
         ) : (
-          <Box sx={{ flex: 1, overflowY: 'auto', pb: 0.5 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {recommendations.map((rec) => {
-              const improvementPercent = (rec.estimated_improvement * 100).toFixed(1);
-              const priorityColors = rec.priority === 'high' 
-                ? { bg: '#ef4444', light: '#ef444420', border: '#ef444440' }
-                : rec.priority === 'medium'
-                ? { bg: '#f59e0b', light: '#f59e0b20', border: '#f59e0b40' }
-                : { bg: '#3b82f6', light: '#3b82f620', border: '#3b82f640' };
+              const severity = getSeverityColor(rec.priority);
+              const impact = rec.impact || {};
 
               return (
-                <Box
+                <Paper
                   key={rec.recommendation_id}
+                  elevation={0}
                   sx={{
-                    p: 1.25,
-                    mb: 1,
+                    p: 2,
+                    background: '#ffffff',
+                    border: `1px solid ${severity.light}`,
                     borderRadius: 1.5,
-                    border: `1px solid ${priorityColors.border}`,
-                    background: priorityColors.light,
-                    '&:hover': {
-                      background: priorityColors.light.replace('20', '30'),
-                      transform: 'translateX(4px)',
-                    },
                     transition: 'all 0.2s',
+                    '&:hover': {
+                      borderColor: severity.bg,
+                      boxShadow: `0 2px 8px ${severity.light}`,
+                    },
                   }}
                 >
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.75 }}>
-                    <Box sx={{ flex: 1 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
-                          {rec.table}
-                        </Typography>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontWeight: 600,
+                          color: '#0f172a',
+                          fontSize: '0.875rem',
+                          mb: 0.75,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                        title={rec.table}
+                      >
+                        {rec.table}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: '#64748b',
+                          fontSize: '0.75rem',
+                          lineHeight: 1.4,
+                          display: 'block',
+                          mb: 1,
+                        }}
+                      >
+                        {buildRationaleLine(rec)}
+                      </Typography>
+                      {rec.partition_column && (
                         <Chip
-                          label={rec.priority}
+                          label={`Partition by: ${rec.partition_column}`}
                           size="small"
                           sx={{
-                            height: '16px',
-                            fontSize: '0.65rem',
-                            backgroundColor: priorityColors.bg,
-                            color: 'white',
+                            height: '20px',
+                            fontSize: '0.6875rem',
+                            backgroundColor: '#f1f5f9',
+                            color: '#475569',
+                            fontWeight: 500,
+                            mb: 1,
+                          }}
+                        />
+                      )}
+                    </Box>
+                    {rec.priority && (
+                      <Chip
+                        label={rec.priority}
+                        size="small"
+                        sx={{
+                          height: '22px',
+                          fontSize: '0.6875rem',
+                          fontWeight: 600,
+                          backgroundColor: severity.light,
+                          color: severity.text,
+                          textTransform: 'capitalize',
+                          ml: 1,
+                        }}
+                      />
+                    )}
+                  </Box>
+
+                  {rec.explanation && (
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        color: '#64748b',
+                        fontSize: '0.75rem',
+                        lineHeight: 1.5,
+                        display: 'block',
+                        mb: 1,
+                      }}
+                    >
+                      {rec.explanation}
+                    </Typography>
+                  )}
+
+                  {/* Potential Impact Indicators */}
+                  {(impact.latency || impact.cost || impact.storage) && (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                      {impact.latency && (
+                        <Chip
+                          icon={
+                            impact.latency === 'decrease' ? (
+                              <TrendingDown sx={{ fontSize: 14, color: '#10b981' }} />
+                            ) : (
+                              <TrendingUp sx={{ fontSize: 14, color: '#ef4444' }} />
+                            )
+                          }
+                          label={`Latency ${impact.latency === 'decrease' ? '↓' : '↑'}`}
+                          size="small"
+                          sx={{
+                            height: '22px',
+                            fontSize: '0.6875rem',
+                            backgroundColor: impact.latency === 'decrease' ? '#d1fae5' : '#fef2f2',
+                            color: impact.latency === 'decrease' ? '#10b981' : '#ef4444',
                             fontWeight: 600,
                           }}
                         />
-                      </Box>
-                      <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                        Partition by: {rec.columns.join(', ')}
-                      </Typography>
+                      )}
+                      {impact.cost && (
+                        <Chip
+                          icon={
+                            impact.cost === 'decrease' ? (
+                              <TrendingDown sx={{ fontSize: 14, color: '#10b981' }} />
+                            ) : (
+                              <TrendingUp sx={{ fontSize: 14, color: '#ef4444' }} />
+                            )
+                          }
+                          label={`Cost ${impact.cost === 'decrease' ? '↓' : '↑'}`}
+                          size="small"
+                          sx={{
+                            height: '22px',
+                            fontSize: '0.6875rem',
+                            backgroundColor: impact.cost === 'decrease' ? '#d1fae5' : '#fef2f2',
+                            color: impact.cost === 'decrease' ? '#10b981' : '#ef4444',
+                            fontWeight: 600,
+                          }}
+                        />
+                      )}
+                      {impact.storage && (
+                        <Chip
+                          icon={<TrendingUp sx={{ fontSize: 14, color: '#f59e0b' }} />}
+                          label="Storage ↑"
+                          size="small"
+                          sx={{
+                            height: '22px',
+                            fontSize: '0.6875rem',
+                            backgroundColor: '#fef3c7',
+                            color: '#92400e',
+                            fontWeight: 600,
+                          }}
+                        />
+                      )}
                     </Box>
-                    <Tooltip title={`${improvementPercent}% improvement expected`}>
-                      <Chip
-                        icon={<TrendingUp sx={{ fontSize: 12 }} />}
-                        label={`+${improvementPercent}%`}
-                        size="small"
-                        sx={{
-                          height: '18px',
-                          fontSize: '0.65rem',
-                          backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                          color: '#10b981',
-                          fontWeight: 600,
-                        }}
-                      />
-                    </Tooltip>
-                  </Box>
-                </Box>
+                  )}
+                </Paper>
               );
             })}
           </Box>
         )}
+
+        {/* Feedback loop indicator (conceptual) */}
+        <Box sx={{ mt: 2.5, pt: 2, borderTop: '1px solid #e2e8f0' }}>
+          <Typography
+            variant="caption"
+            sx={{
+              color: '#94a3b8',
+              fontSize: '0.75rem',
+              lineHeight: 1.4,
+            }}
+          >
+            Continuously refined using execution feedback.
+          </Typography>
+        </Box>
       </CardContent>
     </Card>
   );
 };
-

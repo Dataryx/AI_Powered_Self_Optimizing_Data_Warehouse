@@ -255,7 +255,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
         </Box>
 
         {/* Current Resource Cards */}
-        <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+        <Grid container spacing={1.5} sx={{ mb: 1.5 }} alignItems="stretch">
           <Grid item xs={12} sm={4}>
             <Card
               sx={{
@@ -264,13 +264,16 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                 border: '1.5px solid #6366f140',
                 borderRadius: 1.5,
                 transition: 'all 0.3s',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
                 '&:hover': {
                   transform: 'translateY(-1px)',
                   boxShadow: '0 4px 8px rgba(99, 102, 241, 0.2)',
                 },
               }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexShrink: 0 }}>
                 <Dns sx={{ color: '#6366f1', fontSize: 20 }} />
                 <Box>
                   <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem' }}>
@@ -281,7 +284,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                   </Typography>
                 </Box>
               </Box>
-              <Box sx={{ display: 'flex', gap: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 1.5, flexShrink: 0, mt: 'auto' }}>
                 <Box>
                   <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
                     Active
@@ -310,13 +313,16 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                 border: '1.5px solid #10b98140',
                 borderRadius: 1.5,
                 transition: 'all 0.3s',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
                 '&:hover': {
                   transform: 'translateY(-1px)',
                   boxShadow: '0 4px 8px rgba(16, 185, 129, 0.2)',
                 },
               }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexShrink: 0 }}>
                 <Memory sx={{ color: '#10b981', fontSize: 20 }} />
                 <Box>
                   <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem' }}>
@@ -334,6 +340,8 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                   backgroundColor: '#10b98120',
                   position: 'relative',
                   overflow: 'hidden',
+                  flexShrink: 0,
+                  mt: 'auto',
                 }}
               >
                 <Box
@@ -357,19 +365,22 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                 border: '1.5px solid #ec489940',
                 borderRadius: 1.5,
                 transition: 'all 0.3s',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
                 '&:hover': {
                   transform: 'translateY(-1px)',
                   boxShadow: '0 4px 8px rgba(236, 72, 153, 0.2)',
                 },
               }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0, mt: 'auto' }}>
                 <StorageIcon sx={{ color: '#ec4899', fontSize: 20 }} />
                 <Box>
                   <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem' }}>
                     Database Size
                   </Typography>
-                  <Typography variant="h6" sx={{ fontWeight: 700, color: '#ec4899', fontSize: '0.95rem' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700, color: '#ec4899', fontSize: '1rem' }}>
                     {resources.database_size}
                   </Typography>
                 </Box>

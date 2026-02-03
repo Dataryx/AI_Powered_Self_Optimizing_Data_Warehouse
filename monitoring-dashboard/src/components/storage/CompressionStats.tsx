@@ -13,6 +13,7 @@ import {
   IconButton,
   Tooltip,
   Chip,
+  Link,
 } from '@mui/material';
 import { Refresh, Compress, ChevronLeft, ChevronRight } from '@mui/icons-material';
 import { keyframes } from '@mui/material/styles';
@@ -100,6 +101,7 @@ export const CompressionStats: React.FC<CompressionStatsProps> = ({ refreshKey =
   const [currentLayerIndex, setCurrentLayerIndex] = useState(0);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('right');
   const [isAnimating, setIsAnimating] = useState(false);
+  const [showAllTables, setShowAllTables] = useState(false);
 
   const fetchCompression = useCallback(async () => {
     try {
@@ -241,6 +243,7 @@ export const CompressionStats: React.FC<CompressionStatsProps> = ({ refreshKey =
     const direction = newIndex > currentLayerIndex ? 'right' : 'left';
     setSlideDirection(direction);
     setIsAnimating(true);
+    setShowAllTables(false); // Reset show all when changing layers
     
     setTimeout(() => {
       setCurrentLayerIndex(newIndex);
@@ -380,7 +383,7 @@ export const CompressionStats: React.FC<CompressionStatsProps> = ({ refreshKey =
                   }}
                   formatter={(value: number) => [`${value.toFixed(2)}x`, 'Compression Ratio']}
                 />
-                <Bar dataKey="ratio" radius={[4, 4, 0, 0]} animationDuration={1000} barSize={40}>
+                <Bar dataKey="ratio" radius={[4, 4, 0, 0]} animationDuration={1000} barSize={32}>
                   {chartData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
@@ -558,66 +561,96 @@ export const CompressionStats: React.FC<CompressionStatsProps> = ({ refreshKey =
                 >
                   {currentLayerData.tables.length > 0 ? (
                     <>
-                      {currentLayerData.tables.map((table) => {
-                        const compressionPercent = table.compression_percentage;
-                        return (
-                          <Box
-                            key={table.table}
+                      {/* Sort tables by compression ratio and show top 3 or all */}
+                      {currentLayerData.tables
+                        .sort((a, b) => b.compression_ratio - a.compression_ratio)
+                        .slice(0, showAllTables ? currentLayerData.tables.length : 3)
+                        .map((table) => {
+                          const compressionPercent = table.compression_percentage;
+                          return (
+                            <Box
+                              key={table.table}
+                              sx={{
+                                p: 1,
+                                borderRadius: 1,
+                                backgroundColor: 'rgba(255,255,255,0.7)',
+                                border: `1px solid ${layerColors[currentLayer]}15`,
+                                transition: 'all 0.2s',
+                                flexShrink: 0,
+                                '&:hover': {
+                                  backgroundColor: 'rgba(255,255,255,0.9)',
+                                  borderColor: layerColors[currentLayer],
+                                  transform: 'translateX(2px)',
+                                },
+                              }}
+                            >
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                                <Typography 
+                                  variant="caption" 
+                                  sx={{ 
+                                    fontWeight: 600, 
+                                    fontSize: '0.65rem', 
+                                    flex: 1,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title={table.table}
+                                >
+                                  {table.table}
+                                </Typography>
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: layerColors[currentLayer], fontSize: '0.65rem', ml: 0.75, flexShrink: 0 }}>
+                                  {table.compression_ratio.toFixed(2)}x
+                                </Typography>
+                              </Box>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                                <LinearProgress
+                                  variant="determinate"
+                                  value={Math.min(compressionPercent, 100)}
+                                  sx={{
+                                    flex: 1,
+                                    height: 2.5,
+                                    borderRadius: 1.25,
+                                    backgroundColor: `${layerColors[currentLayer]}20`,
+                                    '& .MuiLinearProgress-bar': {
+                                      background: `linear-gradient(90deg, ${layerColors[currentLayer]} 0%, ${layerColors[currentLayer]}80 100%)`,
+                                      borderRadius: 1.25,
+                                    },
+                                  }}
+                                />
+                                <Typography variant="caption" sx={{ fontWeight: 600, color: layerColors[currentLayer], fontSize: '0.6rem', minWidth: '32px', textAlign: 'right', flexShrink: 0 }}>
+                                  {compressionPercent.toFixed(1)}%
+                                </Typography>
+                              </Box>
+                            </Box>
+                          );
+                        })}
+                      {/* View all tables link if more than 3 */}
+                      {currentLayerData.tables.length > 3 && (
+                        <Box sx={{ pt: 0.5, textAlign: 'center' }}>
+                          <Link
+                            component="button"
+                            variant="caption"
+                            onClick={() => {
+                              setShowAllTables(!showAllTables);
+                            }}
                             sx={{
-                              p: 1,
-                              borderRadius: 1,
-                              backgroundColor: 'rgba(255,255,255,0.7)',
-                              border: `1px solid ${layerColors[currentLayer]}15`,
-                              transition: 'all 0.2s',
-                              flexShrink: 0,
+                              color: layerColors[currentLayer],
+                              fontSize: '0.65rem',
+                              fontWeight: 600,
+                              textDecoration: 'none',
+                              cursor: 'pointer',
                               '&:hover': {
-                                backgroundColor: 'rgba(255,255,255,0.9)',
-                                borderColor: layerColors[currentLayer],
-                                transform: 'translateX(2px)',
+                                textDecoration: 'underline',
                               },
                             }}
                           >
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                              <Typography 
-                                variant="caption" 
-                                sx={{ 
-                                  fontWeight: 600, 
-                                  fontSize: '0.65rem', 
-                                  flex: 1,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }}
-                                title={table.table}
-                              >
-                                {table.table}
-                              </Typography>
-                              <Typography variant="caption" sx={{ fontWeight: 700, color: layerColors[currentLayer], fontSize: '0.65rem', ml: 0.75, flexShrink: 0 }}>
-                                {table.compression_ratio.toFixed(2)}x
-                              </Typography>
-                            </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                              <LinearProgress
-                                variant="determinate"
-                                value={Math.min(compressionPercent, 100)}
-                                sx={{
-                                  flex: 1,
-                                  height: 3,
-                                  borderRadius: 1.5,
-                                  backgroundColor: `${layerColors[currentLayer]}20`,
-                                  '& .MuiLinearProgress-bar': {
-                                    background: `linear-gradient(90deg, ${layerColors[currentLayer]} 0%, ${layerColors[currentLayer]}80 100%)`,
-                                    borderRadius: 1.5,
-                                  },
-                                }}
-                              />
-                              <Typography variant="caption" sx={{ fontWeight: 600, color: layerColors[currentLayer], fontSize: '0.6rem', minWidth: '32px', textAlign: 'right', flexShrink: 0 }}>
-                                {compressionPercent.toFixed(1)}%
-                              </Typography>
-                            </Box>
-                          </Box>
-                        );
-                      })}
+                            {showAllTables 
+                              ? `Show less (top 3)` 
+                              : `View all ${currentLayerData.tables.length} tables`}
+                          </Link>
+                        </Box>
+                      )}
                     </>
                   ) : (
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', textAlign: 'center', py: 2 }}>
