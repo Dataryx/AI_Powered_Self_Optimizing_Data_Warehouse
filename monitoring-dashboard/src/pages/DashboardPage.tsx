@@ -6,6 +6,9 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Typography, Grid, CircularProgress, Alert, Paper, Card, CardContent } from '@mui/material';
 import { apiService } from '../services/api';
+import { mockDataService } from '../services/mockDataService';
+import { useApiStatus } from '../contexts/ApiStatusContext';
+import { PlaceholderContent } from '../components/common/PlaceholderContent';
 import { StatCard } from '../components/dashboard/StatCard';
 import { SalesChart } from '../components/dashboard/SalesChart';
 import { TopProductsChart } from '../components/dashboard/TopProductsChart';
@@ -18,8 +21,11 @@ import {
   Inventory,
   Assessment,
 } from '@mui/icons-material';
+import { useThemeColors } from '../theme/useThemeColors';
 
 export const DashboardPage: React.FC = () => {
+  const colors = useThemeColors();
+  const { isOnline, isChecking } = useApiStatus();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [warehouseSummary, setWarehouseSummary] = useState<any>(null);
@@ -35,11 +41,23 @@ export const DashboardPage: React.FC = () => {
           setLoading(true);
         }
         
-        const [summary, sales, customers] = await Promise.all([
-          apiService.getWarehouseSummary(),
-          apiService.getSalesStats(),
-          apiService.getCustomerStats(),
-        ]);
+        let summary, sales, customers;
+        
+        if (isOnline) {
+          // Use real API when online
+          [summary, sales, customers] = await Promise.all([
+            apiService.getWarehouseSummary(),
+            apiService.getSalesStats(),
+            apiService.getCustomerStats(),
+          ]);
+        } else {
+          // Use mock data when offline
+          [summary, sales, customers] = await Promise.all([
+            mockDataService.getWarehouseSummary(),
+            mockDataService.getSalesStats(),
+            mockDataService.getCustomerStats(),
+          ]);
+        }
         
         if (isMounted) {
           setWarehouseSummary(summary);
@@ -55,8 +73,29 @@ export const DashboardPage: React.FC = () => {
         }
       } catch (err: any) {
         if (isMounted) {
-          setError(err.message || 'Failed to load dashboard data');
-          setLoading(false);
+          // If API fails, try mock data as fallback
+          if (isOnline) {
+            try {
+              const [summary, sales, customers] = await Promise.all([
+                mockDataService.getWarehouseSummary(),
+                mockDataService.getSalesStats(),
+                mockDataService.getCustomerStats(),
+              ]);
+              if (isMounted) {
+                setWarehouseSummary(summary);
+                setSalesStats(sales);
+                setCustomerStats(customers);
+                setError('Using mock data - API unavailable');
+                setLoading(false);
+              }
+            } catch (mockErr) {
+              setError(err.message || 'Failed to load dashboard data');
+              setLoading(false);
+            }
+          } else {
+            setError(err.message || 'Failed to load dashboard data');
+            setLoading(false);
+          }
           console.error('Dashboard error:', err);
         }
       }
@@ -68,7 +107,7 @@ export const DashboardPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isOnline]);
 
   // Default/empty data structure
   const defaultSummary = {
@@ -111,7 +150,7 @@ export const DashboardPage: React.FC = () => {
           sx={{
             fontWeight: 800,
             mb: 0.5,
-            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)',
+            background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.accent} 50%, ${colors.chart[2]} 100%)`,
             backgroundClip: 'text',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
@@ -126,13 +165,20 @@ export const DashboardPage: React.FC = () => {
         </Typography>
       </Box>
 
-      {/* Error and Loading */}
-      {error && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          API unavailable. Showing placeholder data. {error}
+      {/* API Status Alert */}
+      {!isOnline && !isChecking && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <strong>API Server Offline</strong> - Displaying mock data for demonstration. Please start the API server to view live data.
         </Alert>
       )}
-      {loading && (
+      {error && error.includes('mock data') && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Loading */}
+      {loading && isOnline && (
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 2 }}>
           <CircularProgress size={40} />
         </Box>
@@ -142,7 +188,11 @@ export const DashboardPage: React.FC = () => {
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {/* Left Card - Warehouse Overview */}
         <Grid item xs={12} md={6}>
-          <WarehouseOverview summary={displaySummary} />
+          {loading ? (
+            <PlaceholderContent variant="card" title="Loading..." />
+          ) : (
+            <WarehouseOverview summary={displaySummary} />
+          )}
         </Grid>
 
         {/* Right Card - Key Statistics */}
@@ -487,13 +537,21 @@ export const DashboardPage: React.FC = () => {
         </Grid>
       </Grid>
 
-      {/* Charts - Always show */}
+      {/* Charts - Side by Side */}
       <Grid container spacing={2}>
-        <Grid item xs={12}>
-          <SalesChart data={displaySalesStats.daily_sales || []} />
+        <Grid item xs={12} md={6}>
+          {loading ? (
+            <PlaceholderContent variant="chart" title="Loading Sales Chart..." height={400} />
+          ) : (
+            <SalesChart data={displaySalesStats.daily_sales || []} />
+          )}
         </Grid>
-        <Grid item xs={12}>
-          <TopProductsChart data={displaySalesStats.top_products || []} />
+        <Grid item xs={12} md={6}>
+          {loading ? (
+            <PlaceholderContent variant="chart" title="Loading Top Products..." height={400} />
+          ) : (
+            <TopProductsChart data={displaySalesStats.top_products || []} />
+          )}
         </Grid>
       </Grid>
 

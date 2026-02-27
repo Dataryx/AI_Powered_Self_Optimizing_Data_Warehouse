@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardContent, Typography, Box, Grid, Chip, IconButton, Tabs, Tab, Accordion, AccordionSummary, AccordionDetails } from '@mui/material';
 import { Error as ErrorIcon, Warning, Info, ExpandMore, CheckCircle, Close } from '@mui/icons-material';
 import { apiService } from '../../services/api';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 interface Alert {
   alert_id: string;
@@ -33,6 +34,7 @@ interface AlertsData {
 }
 
 export const ActiveAlertsList: React.FC = () => {
+  const colors = useThemeColors();
   const [alerts, setAlerts] = useState<AlertsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [severityFilter, setSeverityFilter] = useState<string>('all');
@@ -69,15 +71,15 @@ export const ActiveAlertsList: React.FC = () => {
     switch (severity) {
       case 'critical':
       case 'high':
-        return <ErrorIcon sx={{ color: '#ef4444', fontSize: 24 }} />;
+        return <ErrorIcon sx={{ color: colors.error, fontSize: 24 }} />;
       case 'warning':
       case 'medium':
-        return <Warning sx={{ color: '#f59e0b', fontSize: 24 }} />;
+        return <Warning sx={{ color: colors.warning, fontSize: 24 }} />;
       case 'info':
       case 'low':
-        return <Info sx={{ color: '#3b82f6', fontSize: 24 }} />;
+        return <Info sx={{ color: colors.primary, fontSize: 24 }} />;
       default:
-        return <Info sx={{ color: '#64748b', fontSize: 24 }} />;
+        return <Info sx={{ color: colors.textSecondary, fontSize: 24 }} />;
     }
   };
 
@@ -102,7 +104,7 @@ export const ActiveAlertsList: React.FC = () => {
 
   if (loading || !alerts) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)' }}>
+      <Card sx={{ background: `linear-gradient(135deg, ${colors.paper} 0%, ${colors.background} 100%)` }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
           <Typography>Loading active alerts...</Typography>
         </CardContent>
@@ -128,7 +130,7 @@ export const ActiveAlertsList: React.FC = () => {
   return (
     <Card
       sx={{
-        background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+        background: `linear-gradient(135deg, ${colors.paper} 0%, ${colors.background} 100%)`,
         border: '1px solid rgba(239, 68, 68, 0.1)',
         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.08)',
       }}
@@ -139,7 +141,7 @@ export const ActiveAlertsList: React.FC = () => {
             variant="h6"
             sx={{
               fontWeight: 700,
-              background: 'linear-gradient(135deg, #ef4444 0%, #f87171 100%)',
+              background: `linear-gradient(135deg, ${colors.error} 0%, ${colors.error}dd 100%)`,
               backgroundClip: 'text',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
@@ -163,8 +165,8 @@ export const ActiveAlertsList: React.FC = () => {
               label={`${unacknowledgedAlerts.length} Unacknowledged`}
               size="small"
               sx={{
-                backgroundColor: '#f59e0b20',
-                color: '#f59e0b',
+                backgroundColor: `${colors.warning}20`,
+                color: colors.warning,
                 fontWeight: 700,
                 fontSize: '0.75rem',
               }}
@@ -194,7 +196,7 @@ export const ActiveAlertsList: React.FC = () => {
                 value={value}
                 sx={{
                   '&.Mui-selected': {
-                    color: value === 'critical' || value === 'high' ? '#ef4444' : '#6366f1',
+                    color: value === 'critical' || value === 'high' ? colors.error : colors.primary,
                   },
                 }}
               />
@@ -213,8 +215,8 @@ export const ActiveAlertsList: React.FC = () => {
               border: '2px solid #10b98130',
             }}
           >
-            <CheckCircle sx={{ color: '#10b981', fontSize: 48, mb: 2 }} />
-            <Typography variant="h6" sx={{ fontWeight: 700, color: '#10b981', mb: 1 }}>
+            <CheckCircle sx={{ color: colors.success, fontSize: 48, mb: 2 }} />
+            <Typography variant="h6" sx={{ fontWeight: 700, color: colors.success, mb: 1 }}>
               No Active Alerts
             </Typography>
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
@@ -302,7 +304,7 @@ export const ActiveAlertsList: React.FC = () => {
                           sx={{
                             color: '#10b981',
                             '&:hover': {
-                              backgroundColor: '#10b98120',
+                              backgroundColor: `${colors.success}20`,
                             },
                           }}
                         >

@@ -1,0 +1,48 @@
+# Base compose: PostgreSQL and Redis for the data warehouse and ML services.
+# Overrides: docker-compose.dev.yml, docker-compose.integration.yml, docker-compose.monitoring.yml
+# Usage: docker-compose up -d postgres redis
+#        docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: dw_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-datawarehouse}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    shm_size: '1gb'
+    networks:
+      - dw_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: dw_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - dw_network
+
+networks:
+  dw_network:
+    driver: bridge
+
+volumes:
+  postgres_data:

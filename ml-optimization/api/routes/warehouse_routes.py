@@ -250,7 +250,7 @@ async def get_sales_statistics():
             ]
             stats['daily_sales'] = daily_sales
             
-            # Top products - optimized
+            # Top products - optimized (Top 20)
             cursor.execute("""
                 SELECT 
                     COALESCE(p.product_name, 'Unknown') as product_name,
@@ -261,7 +261,7 @@ async def get_sales_statistics():
                 LEFT JOIN gold.dim_product p ON fs.product_key = p.product_key
                 GROUP BY p.product_name
                 ORDER BY SUM(fs.net_amount) DESC NULLS LAST
-                LIMIT 10
+                LIMIT 20
             """)
             top_products = [
                 {
@@ -281,6 +281,50 @@ async def get_sales_statistics():
         logger = logging.getLogger(__name__)
         logger.error(f"Error in sales-stats: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error fetching sales statistics: {str(e)}")
+
+
+@router.get("/top-products")
+async def get_top_products(limit: int = 20):
+    """Get top products by revenue."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Top products by revenue
+            cursor.execute("""
+                SELECT 
+                    COALESCE(p.product_name, 'Unknown') as product_name,
+                    COUNT(*) as sales_count,
+                    SUM(fs.net_amount) as revenue,
+                    SUM(fs.quantity) as quantity_sold
+                FROM gold.fact_sales fs
+                LEFT JOIN gold.dim_product p ON fs.product_key = p.product_key
+                GROUP BY p.product_name
+                ORDER BY SUM(fs.net_amount) DESC NULLS LAST
+                LIMIT %s
+            """, (limit,))
+            
+            top_products = [
+                {
+                    "product": row[0],
+                    "sales_count": row[1],
+                    "revenue": float(row[2] or 0),
+                    "quantity": row[3] or 0
+                }
+                for row in cursor.fetchall()
+            ]
+            
+            return {
+                "products": top_products,
+                "count": len(top_products),
+                "limit": limit
+            }
+    except Exception as e:
+        import traceback
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in top-products: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error fetching top products: {str(e)}")
 
 
 @router.get("/customer-stats")

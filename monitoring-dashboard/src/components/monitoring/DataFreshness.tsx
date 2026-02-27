@@ -8,6 +8,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, Typography, Box, Chip, Grid, Tooltip, IconButton, Paper, Divider, Button } from '@mui/material';
 import { CheckCircle, Warning, Error as ErrorIcon, AccessTime, Refresh, ArrowUpward, Storage, TableChart, DataObject } from '@mui/icons-material';
 import { apiService } from '../../services/api';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 interface TableFreshness {
   table: string;
@@ -30,6 +31,7 @@ interface DataFreshnessProps {
 }
 
 export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) => {
+  const colors = useThemeColors();
   const [freshness, setFreshness] = useState<FreshnessData>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +40,7 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
   const fetchFreshness = useCallback(async () => {
     try {
       setError(null);
-      const data = await apiService.getDataFreshness();
+      const data = (await apiService.getDataFreshness()) as { freshness?: FreshnessData };
       console.log('Fetched data freshness:', data);
       setFreshness(data.freshness || {});
       setLastFetch(new Date());
@@ -71,42 +73,42 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'fresh':
-        return <CheckCircle sx={{ color: '#10b981', fontSize: 20 }} />;
+        return <CheckCircle sx={{ color: colors.success, fontSize: 20 }} />;
       case 'stale':
-        return <Warning sx={{ color: '#f59e0b', fontSize: 20 }} />;
+        return <Warning sx={{ color: colors.warning, fontSize: 20 }} />;
       case 'outdated':
-        return <ErrorIcon sx={{ color: '#ef4444', fontSize: 20 }} />;
+        return <ErrorIcon sx={{ color: colors.error, fontSize: 20 }} />;
       default:
-        return <AccessTime sx={{ color: '#64748b', fontSize: 20 }} />;
+        return <AccessTime sx={{ color: colors.textSecondary, fontSize: 20 }} />;
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'fresh':
-        return { bg: '#10b98120', color: '#10b981', border: '#10b98140' };
+        return { bg: `${colors.success}20`, color: colors.success, border: `${colors.success}40` };
       case 'stale':
-        return { bg: '#f59e0b20', color: '#f59e0b', border: '#f59e0b40' };
+        return { bg: `${colors.warning}20`, color: colors.warning, border: `${colors.warning}40` };
       case 'outdated':
-        return { bg: '#ef444420', color: '#ef4444', border: '#ef444440' };
+        return { bg: `${colors.error}20`, color: colors.error, border: `${colors.error}40` };
       default:
-        return { bg: '#64748b20', color: '#64748b', border: '#64748b40' };
+        return { bg: `${colors.textSecondary}20`, color: colors.textSecondary, border: `${colors.textSecondary}40` };
     }
   };
 
   const layers = ['bronze', 'silver', 'gold'];
   const layerNames = { bronze: 'Bronze Layer', silver: 'Silver Layer', gold: 'Gold Layer' };
-  const layerColors = { bronze: '#f59e0b', silver: '#6366f1', gold: '#10b981' };
+  const layerColors = { bronze: colors.warning, silver: colors.accent, gold: colors.success };
   const getLayerIcon = (layer: string) => {
     switch (layer) {
       case 'bronze':
-        return <Storage sx={{ fontSize: 16, color: '#f59e0b' }} />;
+        return <Storage sx={{ fontSize: 16, color: colors.warning }} />;
       case 'silver':
-        return <TableChart sx={{ fontSize: 16, color: '#6366f1' }} />;
+        return <TableChart sx={{ fontSize: 16, color: colors.primary }} />;
       case 'gold':
-        return <DataObject sx={{ fontSize: 16, color: '#10b981' }} />;
+        return <DataObject sx={{ fontSize: 16, color: colors.success }} />;
       default:
-        return <Storage sx={{ fontSize: 16, color: '#64748b' }} />;
+        return <Storage sx={{ fontSize: 16, color: colors.textSecondary }} />;
     }
   };
 
@@ -128,7 +130,7 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
 
   if (loading && Object.keys(freshness).length === 0) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)' }}>
+      <Card sx={{ background: `linear-gradient(135deg, ${colors.paper} 0%, ${colors.background} 100%)` }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
           <Typography>Loading data freshness...</Typography>
         </CardContent>
@@ -138,10 +140,10 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
 
   if (error && Object.keys(freshness).length === 0) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
+      <Card sx={{ background: `linear-gradient(135deg, ${colors.paper} 0%, ${colors.background} 100%)`, border: `1px solid ${colors.error}30` }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <ErrorIcon sx={{ color: '#ef4444', fontSize: 48, mb: 2 }} />
-          <Typography variant="h6" sx={{ fontWeight: 700, color: '#ef4444', mb: 1 }}>
+          <ErrorIcon sx={{ color: colors.error, fontSize: 48, mb: 2 }} />
+          <Typography variant="h6" sx={{ fontWeight: 700, color: colors.error, mb: 1 }}>
             Error Loading Data Freshness
           </Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
@@ -156,9 +158,9 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
 
   if (loading && totalTables === 0) {
     return (
-      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+      <Card elevation={0} sx={{ bgcolor: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+          <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
             Loading freshness data...
           </Typography>
         </CardContent>
@@ -168,16 +170,16 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
 
   if (error && totalTables === 0) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
+      <Card sx={{ background: `linear-gradient(135deg, ${colors.paper} 0%, ${colors.background} 100%)`, border: `1px solid ${colors.error}30` }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <ErrorIcon sx={{ color: '#ef4444', fontSize: 48, mb: 2 }} />
-          <Typography variant="h6" sx={{ fontWeight: 700, color: '#ef4444', mb: 1 }}>
+          <ErrorIcon sx={{ color: colors.error, fontSize: 48, mb: 2 }} />
+          <Typography variant="h6" sx={{ fontWeight: 700, color: colors.error, mb: 1 }}>
             Error Loading Data Freshness
           </Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
             {error}
           </Typography>
-          <IconButton onClick={fetchFreshness} sx={{ color: '#10b981' }}>
+          <IconButton onClick={fetchFreshness} sx={{ color: 'colors.success' }}>
             <Refresh /> Retry
           </IconButton>
         </CardContent>
@@ -187,9 +189,9 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
 
   // Calculate SLA status
   const getSLAStatus = (hoursAgo: number) => {
-    if (hoursAgo < 1) return { status: 'on-time', label: 'On time', color: '#10b981' };
-    if (hoursAgo < 24) return { status: 'at-risk', label: 'At risk', color: '#f59e0b' };
-    return { status: 'breach', label: 'SLA breach', color: '#ef4444' };
+    if (hoursAgo < 1) return { status: 'on-time', label: 'On time', color: colors.success };
+    if (hoursAgo < 24) return { status: 'at-risk', label: 'At risk', color: colors.warning };
+    return { status: 'breach', label: 'SLA breach', color: colors.error };
   };
 
   // Get all tables across layers for dataset-centric view
@@ -208,7 +210,7 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
   const breachCount = allTables.filter((t) => getSLAStatus(t.hours_ago).status === 'breach').length;
 
   return (
-    <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+    <Card elevation={0} sx={{ bgcolor: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
       <CardContent sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Box>
@@ -216,14 +218,14 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
               variant="h6"
               sx={{
                 fontWeight: 600,
-                color: '#0f172a',
+                color: colors.text,
                 fontSize: '1rem',
                 mb: 0.5,
               }}
             >
               Data Freshness & SLA
             </Typography>
-            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+            <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem' }}>
               Dataset freshness with SLA compliance
             </Typography>
           </Box>
@@ -231,7 +233,7 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
             size="small"
             onClick={fetchFreshness}
             sx={{
-              color: '#6366f1',
+              color: colors.primary,
               '&:hover': { backgroundColor: '#f1f5f9' },
             }}
           >
@@ -240,40 +242,40 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
         </Box>
 
         {/* SLA Summary */}
-        <Paper elevation={0} sx={{ p: 2, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 1.5, mb: 3 }}>
+        <Paper elevation={0} sx={{ p: 2, bgcolor: colors.background, border: `1px solid ${colors.border}`, borderRadius: 1.5, mb: 3 }}>
           <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
             <Box>
-              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
+              <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
                 On Time
               </Typography>
-              <Typography variant="h6" sx={{ color: '#10b981', fontSize: '1.25rem', fontWeight: 600 }}>
+              <Typography variant="h6" sx={{ color: colors.success, fontSize: '1.25rem', fontWeight: 600 }}>
                 {onTimeCount}
               </Typography>
             </Box>
-            <Divider orientation="vertical" flexItem sx={{ borderColor: '#e2e8f0' }} />
+            <Divider orientation="vertical" flexItem sx={{ borderColor: colors.border }} />
             <Box>
-              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
+              <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
                 At Risk
               </Typography>
-              <Typography variant="h6" sx={{ color: '#f59e0b', fontSize: '1.25rem', fontWeight: 600 }}>
+              <Typography variant="h6" sx={{ color: colors.warning, fontSize: '1.25rem', fontWeight: 600 }}>
                 {atRiskCount}
               </Typography>
             </Box>
-            <Divider orientation="vertical" flexItem sx={{ borderColor: '#e2e8f0' }} />
+            <Divider orientation="vertical" flexItem sx={{ borderColor: colors.border }} />
             <Box>
-              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
+              <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
                 SLA Breach
               </Typography>
-              <Typography variant="h6" sx={{ color: '#ef4444', fontSize: '1.25rem', fontWeight: 600 }}>
+              <Typography variant="h6" sx={{ color: colors.error, fontSize: '1.25rem', fontWeight: 600 }}>
                 {breachCount}
               </Typography>
             </Box>
-            <Divider orientation="vertical" flexItem sx={{ borderColor: '#e2e8f0' }} />
+            <Divider orientation="vertical" flexItem sx={{ borderColor: colors.border }} />
             <Box>
-              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
+              <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
                 Total Datasets
               </Typography>
-              <Typography variant="h6" sx={{ color: '#0f172a', fontSize: '1.25rem', fontWeight: 600 }}>
+              <Typography variant="h6" sx={{ color: colors.text, fontSize: '1.25rem', fontWeight: 600 }}>
                 {allTables.length}
               </Typography>
             </Box>
@@ -282,8 +284,8 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
 
         {allTables.length === 0 ? (
           <Box sx={{ textAlign: 'center', py: 6 }}>
-            <AccessTime sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
-            <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+            <AccessTime sx={{ fontSize: 40, color: colors.textMuted, mb: 1.5 }} />
+            <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
               No freshness data available
             </Typography>
           </Box>
@@ -301,7 +303,7 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
                       elevation={0}
                       sx={{
                         p: 2,
-                        background: '#ffffff',
+                        bgcolor: colors.paper,
                         border: `1px solid ${slaStatus.color}30`,
                         borderRadius: 1.5,
                         transition: 'all 0.2s ease',
@@ -320,7 +322,7 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
                               variant="body2"
                               sx={{
                                 fontWeight: 600,
-                                color: '#0f172a',
+                                color: colors.text,
                                 fontSize: '0.875rem',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
@@ -335,11 +337,11 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
                         {getStatusIcon(table.status)}
                       </Box>
 
-                      <Divider sx={{ my: 1.5, borderColor: '#e2e8f0' }} />
+                      <Divider sx={{ my: 1.5, borderColor: colors.border }} />
 
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', minWidth: '80px' }}>
+                          <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem', minWidth: '80px' }}>
                             SLA Lag
                           </Typography>
                           <Chip
@@ -356,18 +358,18 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
                           />
                         </Box>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', minWidth: '80px' }}>
+                          <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem', minWidth: '80px' }}>
                             Last Updated
                           </Typography>
-                          <Typography variant="caption" sx={{ color: '#0f172a', fontSize: '0.75rem', fontWeight: 500 }}>
+                          <Typography variant="caption" sx={{ color: colors.text, fontSize: '0.75rem', fontWeight: 500 }}>
                             {formatTimeAgo(table.hours_ago)}
                           </Typography>
                         </Box>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', minWidth: '80px' }}>
+                          <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem', minWidth: '80px' }}>
                             Records
                           </Typography>
-                          <Typography variant="caption" sx={{ color: '#0f172a', fontSize: '0.75rem', fontWeight: 500 }}>
+                          <Typography variant="caption" sx={{ color: colors.text, fontSize: '0.75rem', fontWeight: 500 }}>
                             {table.total_records.toLocaleString()}
                           </Typography>
                         </Box>
@@ -383,15 +385,15 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
                   variant="outlined"
                   size="small"
                   sx={{
-                    color: '#6366f1',
-                    borderColor: '#6366f1',
+                    color: colors.primary,
+                    borderColor: colors.primary,
                     fontSize: '0.8125rem',
                     fontWeight: 500,
                     textTransform: 'none',
                     px: 3,
                     '&:hover': {
-                      borderColor: '#6366f1',
-                      backgroundColor: '#6366f115',
+                      borderColor: colors.primary,
+                      backgroundColor: `${colors.primary}15`,
                     },
                   }}
                 >

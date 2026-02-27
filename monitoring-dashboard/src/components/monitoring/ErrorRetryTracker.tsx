@@ -7,8 +7,9 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, Typography, Box, Chip, IconButton, Paper, Divider } from '@mui/material';
-import { Error as ErrorIcon, Warning, Refresh, CheckCircle } from '@mui/icons-material';
+import { Error as ErrorIcon, Warning, Refresh, CheckCircle, Info } from '@mui/icons-material';
 import { apiService } from '../../services/api';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 interface ETLError {
   error_id: string;
@@ -28,6 +29,7 @@ interface ErrorRetryTrackerProps {
 }
 
 export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey = 0 }) => {
+  const colors = useThemeColors();
   const [errors, setErrors] = useState<ETLError[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,28 +77,28 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
       case 'medium':
         return <Warning sx={{ color: '#f59e0b', fontSize: 20 }} />;
       default:
-        return <Info sx={{ color: '#64748b', fontSize: 20 }} />;
+        return <Info sx={{ color: colors.textSecondary, fontSize: 20 }} />;
     }
   };
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'critical':
-        return { bg: '#ef4444', text: 'white', border: '#ef4444' };
+        return { bg: colors.error, text: 'white', border: colors.error };
       case 'high':
-        return { bg: '#f87171', text: 'white', border: '#f87171' };
+        return { bg: colors.error, text: 'white', border: colors.error };
       case 'warning':
-        return { bg: '#f59e0b', text: 'white', border: '#f59e0b' };
+        return { bg: colors.warning, text: 'white', border: colors.warning };
       case 'medium':
-        return { bg: '#fbbf24', text: 'black', border: '#fbbf24' };
+        return { bg: colors.warningLight, text: colors.text, border: colors.warning };
       default:
-        return { bg: '#64748b', text: 'white', border: '#64748b' };
+        return { bg: colors.textSecondary, text: 'white', border: colors.textSecondary };
     }
   };
 
   if (loading && errors.length === 0) {
     return (
-      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+      <Card elevation={0} sx={{ bgcolor: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
           <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
             Loading error tracking...
@@ -108,16 +110,16 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
 
   if (error && errors.length === 0) {
     return (
-      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+      <Card elevation={0} sx={{ bgcolor: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <ErrorIcon sx={{ color: '#ef4444', fontSize: 40, mb: 1.5 }} />
-          <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', mb: 0.5, fontSize: '1rem' }}>
+          <ErrorIcon sx={{ color: colors.error, fontSize: 40, mb: 1.5 }} />
+          <Typography variant="h6" sx={{ fontWeight: 600, color: colors.text, mb: 0.5, fontSize: '1rem' }}>
             Error Loading Error Tracker
           </Typography>
-          <Typography variant="body2" sx={{ color: '#64748b', mb: 2, fontSize: '0.875rem' }}>
+          <Typography variant="body2" sx={{ color: colors.textSecondary, mb: 2, fontSize: '0.875rem' }}>
             {error}
           </Typography>
-          <IconButton onClick={fetchErrors} sx={{ color: '#6366f1', '&:hover': { backgroundColor: '#f1f5f9' } }}>
+          <IconButton onClick={fetchErrors} sx={{ color: colors.primary, '&:hover': { backgroundColor: colors.background } }}>
             <Refresh /> Retry
           </IconButton>
         </CardContent>
@@ -137,14 +139,14 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
   };
 
   return (
-    <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+    <Card elevation={0} sx={{ bgcolor: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
       <CardContent sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography
             variant="h6"
             sx={{
               fontWeight: 600,
-              color: '#0f172a',
+              color: colors.text,
               fontSize: '1rem',
             }}
           >
@@ -169,7 +171,7 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
               size="small"
               onClick={fetchErrors}
               sx={{
-                color: '#6366f1',
+                color: colors.primary,
                 '&:hover': { backgroundColor: '#f1f5f9' },
               }}
             >
@@ -184,16 +186,16 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
             sx={{
               p: 4,
               textAlign: 'center',
-              background: '#f0fdf4',
-              border: '1px solid #bbf7d0',
+              background: `${colors.successLight}40`,
+              border: `1px solid ${colors.success}40`,
               borderRadius: 1.5,
             }}
           >
-            <CheckCircle sx={{ fontSize: 48, color: '#10b981', mb: 1.5 }} />
-            <Typography variant="body1" sx={{ fontWeight: 600, color: '#166534', mb: 0.5, fontSize: '0.9375rem' }}>
+            <CheckCircle sx={{ fontSize: 48, color: colors.success, mb: 1.5 }} />
+            <Typography variant="body1" sx={{ fontWeight: 600, color: colors.success, mb: 0.5, fontSize: '0.9375rem' }}>
               No Active Errors
             </Typography>
-            <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+            <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
               All ETL processes are running smoothly
             </Typography>
           </Paper>
@@ -207,7 +209,7 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
                   elevation={0}
                   sx={{
                     p: 2,
-                    background: '#ffffff',
+                    bgcolor: colors.paper,
                     border: `1px solid ${severityColors.border}30`,
                     borderRadius: 1.5,
                     transition: 'all 0.2s ease',
@@ -227,7 +229,7 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
                           variant="body2"
                           sx={{
                             fontWeight: 600,
-                            color: '#0f172a',
+                            color: colors.text,
                             fontSize: '0.875rem',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -278,12 +280,12 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
                             label={`${error.retry_count} retries`}
                             size="small"
                             sx={{
-                              backgroundColor: '#6366f115',
-                              color: '#6366f1',
+                              backgroundColor: `${colors.primary}15`,
+                              color: colors.primary,
                               fontWeight: 500,
                               fontSize: '0.6875rem',
                               height: '20px',
-                              border: '1px solid #6366f130',
+                              border: `1px solid ${colors.primary}30`,
                             }}
                           />
                         )}

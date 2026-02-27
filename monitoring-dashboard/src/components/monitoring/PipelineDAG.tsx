@@ -8,6 +8,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardContent, Typography, Box, Paper, Chip, Tooltip } from '@mui/material';
 import { ArrowForward, DataObject, Storage, TableChart, Transform, CheckCircle, Warning, Error as ErrorIcon } from '@mui/icons-material';
 import { apiService } from '../../services/api';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 interface DAGNode {
   id: string;
@@ -37,6 +38,7 @@ interface ETLJob {
 }
 
 export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
+  const colors = useThemeColors();
   const [nodes, setNodes] = useState<DAGNode[]>([]);
   const [edges, setEdges] = useState<DAGEdge[]>([]);
   const [etlJobs, setEtlJobs] = useState<ETLJob[]>([]);
@@ -92,13 +94,13 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
   const getLayerColor = (layer: string) => {
     switch (layer) {
       case 'bronze':
-        return { bg: '#fef3c7', border: '#f59e0b', text: '#92400e', accent: '#f59e0b' };
+        return { bg: colors.layerBronze.bg, border: colors.layerBronze.border, text: colors.layerBronze.text, accent: colors.layerBronze.accent };
       case 'silver':
-        return { bg: '#e0e7ff', border: '#6366f1', text: '#312e81', accent: '#6366f1' };
+        return { bg: colors.layerSilver.bg, border: colors.layerSilver.border, text: colors.layerSilver.text, accent: colors.layerSilver.accent };
       case 'gold':
-        return { bg: '#d1fae5', border: '#10b981', text: '#065f46', accent: '#10b981' };
+        return { bg: colors.layerGold.bg, border: colors.layerGold.border, text: colors.layerGold.text, accent: colors.layerGold.accent };
       default:
-        return { bg: '#f1f5f9', border: '#64748b', text: '#334155', accent: '#64748b' };
+        return { bg: colors.accentLight, border: colors.textSecondary, text: colors.textMuted, accent: colors.textSecondary };
     }
   };
 
@@ -150,15 +152,15 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'healthy':
-        return '#10b981';
+        return colors.success;
       case 'slow':
-        return '#f59e0b';
+        return colors.warning;
       case 'failed':
-        return '#ef4444';
+        return colors.error;
       case 'anomaly':
-        return '#dc2626';
+        return colors.error;
       default:
-        return '#10b981';
+        return colors.success;
     }
   };
 
@@ -179,13 +181,23 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
 
   // Get real metrics from ETL jobs for hover tooltip
   const getNodeMetrics = (node: DAGNode) => {
-    // Find matching ETL jobs for this node
-    const nodeJobs = etlJobs.filter((job: ETLJob) => {
+    const nodeLabel = node.label?.toLowerCase() || '';
+
+    // Prefer direct matches on job/table name
+    let nodeJobs = etlJobs.filter((job: ETLJob) => {
       const jobName = job.job_name?.toLowerCase() || '';
-      const nodeLabel = node.label?.toLowerCase() || '';
-      return jobName.includes(nodeLabel) || nodeLabel.includes(jobName) || 
-             (job.table && nodeLabel.includes(job.table.toLowerCase()));
+      const tableName = job.table?.toLowerCase() || '';
+      return (
+        jobName.includes(nodeLabel) ||
+        nodeLabel.includes(jobName) ||
+        (tableName && (nodeLabel.includes(tableName) || tableName.includes(nodeLabel)))
+      );
     });
+
+    // Fallback: if nothing matched by name, use jobs from the same layer
+    if (nodeJobs.length === 0) {
+      nodeJobs = etlJobs.filter((job: ETLJob) => job.layer?.toLowerCase() === node.layer?.toLowerCase());
+    }
 
     if (nodeJobs.length === 0) {
       return {
@@ -195,41 +207,61 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
       };
     }
 
-    // Calculate durations from completed jobs
-    const completedJobs = nodeJobs.filter((job: ETLJob) => 
-      job.completed_at && job.started_at
-    );
+    // Helper to get "rows processed" from multiple possible fields
+    const getRowsProcessed = (job: ETLJob & { rows_processed?: number; row_count?: number }) => {
+      return (
+        job.records_processed ??
+        job.rows_processed ??
+        job.row_count ??
+        0
+      );
+    };
 
-    if (completedJobs.length === 0) {
+    // Prefer explicit duration field if backend provides it
+    const getJobDurationSeconds = (job: ETLJob & { duration_seconds?: number }) => {
+      if (typeof job.duration_seconds === 'number' && !Number.isNaN(job.duration_seconds)) {
+        return job.duration_seconds;
+      }
+      if (job.completed_at && job.started_at) {
+        const start = new Date(job.started_at).getTime();
+        const end = new Date(job.completed_at).getTime();
+        if (!Number.isNaN(start) && !Number.isNaN(end) && end >= start) {
+          return Math.round((end - start) / 1000);
+        }
+      }
+      return null;
+    };
+
+    const completedWithDuration = nodeJobs
+      .map((job) => ({ job, duration: getJobDurationSeconds(job as any) }))
+      .filter((item) => item.duration !== null) as { job: ETLJob; duration: number }[];
+
+    if (completedWithDuration.length === 0) {
       return {
         lastRunDuration: null,
         medianDuration: null,
-        rowsProcessed: nodeJobs.reduce((sum, job) => sum + (job.records_processed || 0), 0),
+        rowsProcessed: nodeJobs.reduce((sum, job) => sum + getRowsProcessed(job as any), 0),
       };
     }
 
-    const durations = completedJobs.map((job: ETLJob) => {
-      const start = new Date(job.started_at).getTime();
-      const end = new Date(job.completed_at!).getTime();
-      return Math.round((end - start) / 1000);
-    });
-
-    // Get last run duration (most recent job)
-    const sortedByTime = [...completedJobs].sort((a, b) => {
-      const timeA = new Date(a.completed_at!).getTime();
-      const timeB = new Date(b.completed_at!).getTime();
+    // Last run = most recent completed job
+    const sortedByTime = [...completedWithDuration].sort((a, b) => {
+      const timeA = a.job.completed_at ? new Date(a.job.completed_at).getTime() : 0;
+      const timeB = b.job.completed_at ? new Date(b.job.completed_at).getTime() : 0;
       return timeB - timeA;
     });
-    const lastRunDuration = sortedByTime.length > 0 ? 
-      Math.round((new Date(sortedByTime[0].completed_at!).getTime() - new Date(sortedByTime[0].started_at).getTime()) / 1000) : null;
+    const lastRunDuration = sortedByTime[0]?.duration ?? null;
 
-    // Calculate median duration
-    const sortedDurations = [...durations].sort((a, b) => a - b);
-    const medianDuration = sortedDurations.length > 0 ? 
-      sortedDurations[Math.floor(sortedDurations.length / 2)] : null;
+    // Median duration across matched jobs
+    const durations = completedWithDuration.map((d) => d.duration).sort((a, b) => a - b);
+    const medianDuration =
+      durations.length > 0 ? durations[Math.floor(durations.length / 2)] : null;
 
-    // Sum rows processed
-    const rowsProcessed = nodeJobs.reduce((sum, job) => sum + (job.records_processed || 0), 0);
+    // Sum rows processed across all matched jobs
+    const rowsProcessed = nodeJobs.reduce(
+      (sum, job) => sum + getRowsProcessed(job as any),
+      0
+    );
 
     return {
       lastRunDuration,
@@ -255,22 +287,22 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
 
   if (loading) {
     return (
-      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+      <Card elevation={0} sx={{ background: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography variant="body2" sx={{ color: '#64748b' }}>Loading pipeline lineage...</Typography>
+          <Typography variant="body2" sx={{ color: colors.textSecondary }}>Loading pipeline lineage...</Typography>
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+    <Card elevation={0} sx={{ background: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
       <CardContent sx={{ p: 3 }}>
         <Typography
           variant="h6"
           sx={{
             fontWeight: 600,
-            color: '#0f172a',
+            color: colors.text,
             fontSize: '1rem',
             mb: 3,
           }}
@@ -317,7 +349,7 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
 
                 {/* Nodes in Horizontal Flow */}
                 {layerNodes.length === 0 ? (
-                  <Box sx={{ p: 2, textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
+                  <Box sx={{ p: 2, textAlign: 'center', color: colors.textMuted, fontSize: '0.875rem' }}>
                     No pipelines in {layer} layer
                   </Box>
                 ) : (
@@ -368,7 +400,7 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
                             sx={{
                               p: 2,
                               minWidth: '140px',
-                              background: '#ffffff',
+                              background: colors.paper,
                               border: `0.5px solid ${layerColor.border}80`,
                               borderRadius: 1.5,
                               cursor: 'pointer',
@@ -402,7 +434,7 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
                               variant="body2"
                               sx={{
                                 fontWeight: 600,
-                                color: '#0f172a',
+                                color: colors.text,
                                 fontSize: '0.8125rem',
                                 mb: 0.75,
                                 lineHeight: 1.3,
@@ -414,8 +446,8 @@ export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
                               label={node.type}
                               size="small"
                               sx={{
-                                backgroundColor: '#f1f5f9',
-                                color: '#64748b',
+                                backgroundColor: colors.background,
+                                color: colors.textSecondary,
                                 fontWeight: 500,
                                 fontSize: '0.6875rem',
                                 height: '18px',

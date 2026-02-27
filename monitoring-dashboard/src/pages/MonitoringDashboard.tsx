@@ -26,6 +26,7 @@ import { PipelineDAG } from '../components/monitoring/PipelineDAG';
 import { DataFreshness } from '../components/monitoring/DataFreshness';
 import { ErrorRetryTracker } from '../components/monitoring/ErrorRetryTracker';
 import { DataQualityMetrics } from '../components/monitoring/DataQualityMetrics';
+import { ThroughputMetrics } from '../components/monitoring/ThroughputMetrics';
 import { ApiStatusChecker } from '../components/common/ApiStatusChecker';
 import { apiService } from '../services/api';
 
@@ -369,17 +370,22 @@ export const MonitoringDashboard: React.FC = () => {
 
         {/* ETL Lineage Visualization */}
         <Box sx={{ mb: 4 }}>
-          <PipelineDAG key={`dag-${refreshKey}`} />
+          <PipelineDAG refreshKey={refreshKey} />
         </Box>
-
-        {/* Recent ETL Runs */}
+        
+        {/* Recent ETL Runs (real-time via WebSocket) */}
         <Box sx={{ mb: 4 }}>
-          <ETLJobStatus key={`jobs-${refreshKey}`} />
+          <ETLJobStatus refreshKey={refreshKey} />
         </Box>
 
+        {/* Throughput Metrics */}
+        <Box sx={{ mb: 4 }}>
+          <ThroughputMetrics refreshKey={refreshKey} />
+        </Box>
+        
         {/* Data Freshness & SLA */}
         <Box sx={{ mb: 4 }}>
-          <DataFreshness key={`freshness-${refreshKey}`} />
+          <DataFreshness refreshKey={refreshKey} />
         </Box>
 
         {/* Two Column Layout */}
@@ -478,12 +484,12 @@ export const MonitoringDashboard: React.FC = () => {
 
           {/* Data Quality */}
           <Grid item xs={12} lg={6}>
-            <DataQualityMetrics key={`quality-${refreshKey}`} />
+            <DataQualityMetrics refreshKey={refreshKey} />
           </Grid>
-
+          
           {/* Errors & Retries */}
           <Grid item xs={12}>
-            <ErrorRetryTracker key={`errors-${refreshKey}`} />
+            <ErrorRetryTracker refreshKey={refreshKey} />
           </Grid>
         </Grid>
       </Box>

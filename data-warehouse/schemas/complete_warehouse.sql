@@ -440,7 +440,8 @@ CREATE TABLE silver.person_location (
     valid_to TIMESTAMP DEFAULT '9999-12-31 23:59:59',
     _etl_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_silver_personloc_person FOREIGN KEY (person_key) REFERENCES silver.person(person_key),
-    CONSTRAINT fk_silver_personloc_location FOREIGN KEY (location_key) REFERENCES silver.location(location_key)
+    CONSTRAINT fk_silver_personloc_location FOREIGN KEY (location_key) REFERENCES silver.location(location_key),
+    CONSTRAINT uk_person_location_unique UNIQUE (person_key, location_key)
 );
 
 CREATE TABLE silver.phone_number (
@@ -500,7 +501,7 @@ CREATE TABLE silver.customer_employee (
 CREATE TABLE silver.customer (
     customer_key BIGSERIAL PRIMARY KEY,
     customer_id INT NOT NULL UNIQUE,
-    person_key BIGINT,
+    person_key BIGINT NOT NULL,
     customer_employee_key BIGINT,
     account_manager_id INT,
     income_level INT,

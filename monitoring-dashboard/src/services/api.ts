@@ -52,9 +52,18 @@ class ApiService {
     return this.request('/warehouse/customer-stats');
   }
 
+  async getTopProducts(limit: number = 20) {
+    return this.request(`/warehouse/top-products?limit=${limit}`);
+  }
+
   // Health check
   async getHealth() {
-    return fetch('http://localhost:8000/health').then(res => res.json());
+    const healthUrl = API_BASE_URL.replace('/api/v1', '') + '/health';
+    const response = await fetch(healthUrl);
+    if (!response.ok) {
+      throw new Error(`Health check failed: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
   }
 
   // Monitoring endpoints

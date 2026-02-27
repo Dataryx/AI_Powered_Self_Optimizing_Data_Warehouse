@@ -24,6 +24,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { apiService } from '../../services/api';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 interface ResourceData {
   connections: {
@@ -40,6 +41,7 @@ interface ResourceAllocationProps {
 }
 
 export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshKey = 0 }) => {
+  const colors = useThemeColors();
   const [resources, setResources] = useState<ResourceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState<any[]>([]);
@@ -87,7 +89,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
         sx={{
           background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
           backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(99, 102, 241, 0.2)',
+          border: `1px solid ${colors.primary}30`,
           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
           height: '100%',
           position: 'relative',
@@ -99,7 +101,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
             left: 0,
             right: 0,
             height: '4px',
-            background: 'linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%)',
+            background: `linear-gradient(90deg, ${colors.primary} 0%, ${colors.accent} 100%)`,
           },
         }}
       >
@@ -110,7 +112,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                 sx={{
                   p: 1.5,
                   borderRadius: 2,
-                  background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                  background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.accent} 100%)`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -123,7 +125,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                   variant="h6"
                   sx={{
                     fontWeight: 700,
-                    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                    background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.accent} 100%)`,
                     backgroundClip: 'text',
                     WebkitBackgroundClip: 'text',
                     WebkitTextFillColor: 'transparent',
@@ -142,10 +144,10 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                 onClick={fetchResources}
                 size="small"
                 sx={{
-                  backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                  color: '#6366f1',
+                  backgroundColor: `${colors.primary}18`,
+                  color: colors.primary,
                   '&:hover': {
-                    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                    backgroundColor: `${colors.primary}28`,
                     transform: 'rotate(180deg)',
                   },
                   transition: 'all 0.3s',
@@ -181,7 +183,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
       sx={{
         background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)',
         backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(99, 102, 241, 0.2)',
+        border: `1px solid ${colors.primary}30`,
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
         maxHeight: '600px',
         position: 'relative',
@@ -193,7 +195,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
           left: 0,
           right: 0,
           height: '4px',
-          background: 'linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%)',
+          background: `linear-gradient(90deg, ${colors.primary} 0%, ${colors.accent} 100%)`,
         },
       }}
     >
@@ -204,7 +206,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
               sx={{
                 p: 0.75,
                 borderRadius: 1,
-                background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.accent} 100%)`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -217,7 +219,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                 variant="h6"
                 sx={{
                   fontWeight: 700,
-                  background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                  background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.accent} 100%)`,
                   backgroundClip: 'text',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
@@ -239,7 +241,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
               size="small"
               sx={{
                 backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                color: '#6366f1',
+                color: colors.primary,
                 width: '28px',
                 height: '28px',
                 '&:hover': {
@@ -260,8 +262,8 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
             <Card
               sx={{
                 p: 1.25,
-                background: 'linear-gradient(135deg, #6366f120 0%, rgba(255,255,255,0.9) 100%)',
-                border: '1.5px solid #6366f140',
+                background: `linear-gradient(135deg, ${colors.primary}20 0%, rgba(255,255,255,0.9) 100%)`,
+                border: `1.5px solid ${colors.primary}40`,
                 borderRadius: 1.5,
                 transition: 'all 0.3s',
                 height: '100%',
@@ -269,17 +271,17 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                 flexDirection: 'column',
                 '&:hover': {
                   transform: 'translateY(-1px)',
-                  boxShadow: '0 4px 8px rgba(99, 102, 241, 0.2)',
+                  boxShadow: `0 4px 8px ${colors.primary}30`,
                 },
               }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexShrink: 0 }}>
-                <Dns sx={{ color: '#6366f1', fontSize: 20 }} />
+                <Dns sx={{ color: colors.primary, fontSize: 20 }} />
                 <Box>
                   <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem' }}>
                     Connections
                   </Typography>
-                  <Typography variant="h6" sx={{ fontWeight: 700, color: '#6366f1', fontSize: '1rem' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700, color: colors.primary, fontSize: '1rem' }}>
                     {resources.connections.total}
                   </Typography>
                 </Box>
@@ -289,7 +291,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                   <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
                     Active
                   </Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 600, color: '#10b981', fontSize: '0.75rem' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: colors.success, fontSize: '0.75rem' }}>
                     {resources.connections.active}
                   </Typography>
                 </Box>
@@ -297,7 +299,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                   <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
                     Idle
                   </Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 600, color: '#64748b', fontSize: '0.75rem' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: 'colors.textSecondary', fontSize: '0.75rem' }}>
                     {resources.connections.idle}
                   </Typography>
                 </Box>
@@ -348,7 +350,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                   sx={{
                     height: '100%',
                     width: `${connectionUtilization}%`,
-                    background: 'linear-gradient(90deg, #10b981 0%, #34d399 100%)',
+                    background: `linear-gradient(90deg, ${colors.success} 0%, ${colors.primaryLight} 100%)`,
                     borderRadius: 3,
                     transition: 'width 0.3s',
                   }}
@@ -361,7 +363,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
             <Card
               sx={{
                 p: 1.25,
-                background: 'linear-gradient(135deg, #ec489920 0%, rgba(255,255,255,0.9) 100%)',
+                background: `linear-gradient(135deg, ${colors.accent}20 0%, rgba(255,255,255,0.9) 100%)`,
                 border: '1.5px solid #ec489940',
                 borderRadius: 1.5,
                 transition: 'all 0.3s',
@@ -397,8 +399,8 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
               height: 180,
               p: 1,
               borderRadius: 1.5,
-              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.03) 0%, rgba(255,255,255,0.5) 100%)',
-              border: '1px solid rgba(99, 102, 241, 0.1)',
+              background: `linear-gradient(135deg, ${colors.primary}08 0%, rgba(255,255,255,0.5) 100%)`,
+              border: `1px solid ${colors.primary}18`,
             }}
           >
             <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5, fontSize: '0.7rem' }}>
@@ -408,25 +410,25 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
               <AreaChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                 <defs>
                   <linearGradient id="colorActive" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                    <stop offset="5%" stopColor={colors.primary} stopOpacity={0.4} />
+                    <stop offset="95%" stopColor={colors.primary} stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="colorIdle" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#64748b" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#64748b" stopOpacity={0} />
+                    <stop offset="5%" stopColor="colors.textSecondary" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="colors.textSecondary" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.5} />
+                <CartesianGrid strokeDasharray="3 3" stroke={colors.border} opacity={0.5} />
                 <XAxis
                   dataKey="time"
-                  stroke="#64748b"
+                  stroke="colors.textSecondary"
                   style={{ fontSize: '9px' }}
                 />
-                <YAxis stroke="#64748b" style={{ fontSize: '9px' }} width={30} />
+                <YAxis stroke="colors.textSecondary" style={{ fontSize: '9px' }} width={30} />
                 <RechartsTooltip
                   contentStyle={{
                     backgroundColor: 'rgba(255, 255, 255, 0.98)',
-                    border: '1px solid rgba(99, 102, 241, 0.2)',
+                    border: `1px solid ${colors.primary}30`,
                     borderRadius: 8,
                     fontSize: '10px',
                     padding: '4px 8px',
@@ -435,7 +437,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                 <Area
                   type="monotone"
                   dataKey="active"
-                  stroke="#6366f1"
+                  stroke={colors.primary}
                   fill="url(#colorActive)"
                   name="Active Connections"
                   strokeWidth={1.5}
@@ -444,7 +446,7 @@ export const ResourceAllocation: React.FC<ResourceAllocationProps> = ({ refreshK
                 <Area
                   type="monotone"
                   dataKey="idle"
-                  stroke="#64748b"
+                  stroke="colors.textSecondary"
                   fill="url(#colorIdle)"
                   name="Idle Connections"
                   strokeWidth={1.5}

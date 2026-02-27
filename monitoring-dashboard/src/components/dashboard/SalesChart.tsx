@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { Card, CardContent, Typography, Box } from '@mui/material';
+import { useThemeColors } from '../../theme/useThemeColors';
 import {
   AreaChart,
   Area,
@@ -14,9 +15,6 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  defs,
-  linearGradient,
-  stop,
 } from 'recharts';
 
 interface SalesChartProps {
@@ -24,6 +22,7 @@ interface SalesChartProps {
 }
 
 export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
+  const colors = useThemeColors();
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   
   // Handle empty or missing data and ensure proper sorting
@@ -63,8 +62,8 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
     <Card
       sx={{
         height: '100%',
-        background: '#ffffff',
-        border: '1px solid #e5e7eb',
+        bgcolor: colors.paper,
+        border: `1px solid ${colors.border}`,
         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
         transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         '&:hover': {
@@ -89,7 +88,7 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
             <Typography
               variant="caption"
               sx={{
-                color: '#6b7280',
+                color: colors.textSecondary,
                 fontSize: '0.75rem',
               }}
             >
@@ -97,7 +96,7 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
             </Typography>
           </Box>
         </Box>
-        <Box sx={{ width: '100%', height: 320, mt: 1 }}>
+        <Box sx={{ width: '100%', height: 300, mt: 1 }}>
           <ResponsiveContainer>
             <AreaChart
               data={chartData}
@@ -107,14 +106,14 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
             >
               <defs>
                 <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-                  <stop offset="50%" stopColor="#6366f1" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  <stop offset="5%" stopColor={colors.primary} stopOpacity={0.4} />
+                  <stop offset="50%" stopColor={colors.primary} stopOpacity={0.2} />
+                  <stop offset="95%" stopColor={colors.primary} stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#ec4899" stopOpacity={0.4} />
-                  <stop offset="50%" stopColor="#ec4899" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#ec4899" stopOpacity={0} />
+                  <stop offset="5%" stopColor={colors.accent} stopOpacity={0.4} />
+                  <stop offset="50%" stopColor={colors.accent} stopOpacity={0.2} />
+                  <stop offset="95%" stopColor={colors.accent} stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid 
@@ -134,11 +133,11 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
               />
               <YAxis
                 yAxisId="left"
-                stroke="#6366f1"
+                stroke={colors.primary}
                 style={{ fontSize: '11px', fontWeight: 500 }}
                 tickLine={false}
                 axisLine={false}
-                tick={{ fill: '#6366f1' }}
+                tick={{ fill: colors.primary }}
                 domain={[0, maxSales * 1.1]}
                 tickFormatter={(value) => value.toLocaleString()}
               />
@@ -155,13 +154,13 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
               />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.98)',
-                  border: '1px solid #e5e7eb',
+                  backgroundColor: colors.paper,
+                  border: `1px solid ${colors.border}`,
                   borderRadius: 8,
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
                   padding: '12px 16px',
                 }}
-                cursor={{ stroke: '#6366f1', strokeWidth: 1.5, strokeDasharray: '5 5', opacity: 0.5 }}
+                cursor={{ stroke: colors.primary, strokeWidth: 1.5, strokeDasharray: '5 5', opacity: 0.5 }}
                 formatter={(value: number, name: string) => {
                   if (name === 'Sales Count') {
                     return [value.toLocaleString(), 'Sales'];
@@ -172,13 +171,13 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
                   return [value, name];
                 }}
                 labelStyle={{ 
-                  color: '#1f2937', 
+                  color: colors.text, 
                   fontWeight: 600, 
                   fontSize: '12px',
                   marginBottom: '8px'
                 }}
                 itemStyle={{ 
-                  color: '#6b7280', 
+                  color: colors.textSecondary, 
                   fontSize: '12px',
                   padding: '2px 0'
                 }}
@@ -188,7 +187,7 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
                 iconType="circle"
                 iconSize={8}
                 formatter={(value) => (
-                  <span style={{ fontWeight: 500, fontSize: '12px', color: '#6b7280' }}>
+                  <span style={{ fontWeight: 500, fontSize: '12px', color: colors.textSecondary }}>
                     {value === 'Sales Count' ? 'Sales' : value === 'Revenue ($)' ? 'Revenue' : value}
                   </span>
                 )}
@@ -197,16 +196,16 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
                 yAxisId="left"
                 type="monotone"
                 dataKey="sales"
-                stroke="#6366f1"
+                stroke={colors.primary}
                 strokeWidth={2.5}
                 fill="url(#colorSales)"
                 name="Sales Count"
                 dot={false}
                 activeDot={{ 
                   r: 5, 
-                  fill: '#6366f1', 
+                  fill: colors.primary, 
                   strokeWidth: 2, 
-                  stroke: '#ffffff',
+                  stroke: colors.paper,
                   style: { filter: 'drop-shadow(0 2px 4px rgba(99, 102, 241, 0.3))' }
                 }}
                 animationDuration={800}
@@ -216,16 +215,16 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
                 yAxisId="right"
                 type="monotone"
                 dataKey="revenue"
-                stroke="#ec4899"
+                stroke={colors.accent}
                 strokeWidth={2.5}
                 fill="url(#colorRevenue)"
                 name="Revenue ($)"
                 dot={false}
                 activeDot={{ 
                   r: 5, 
-                  fill: '#ec4899', 
+                  fill: colors.accent, 
                   strokeWidth: 2, 
-                  stroke: '#ffffff',
+                  stroke: colors.paper,
                   style: { filter: 'drop-shadow(0 2px 4px rgba(236, 72, 153, 0.3))' }
                 }}
                 animationDuration={800}

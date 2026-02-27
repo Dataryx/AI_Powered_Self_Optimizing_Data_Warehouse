@@ -9,6 +9,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, Typography, Box, Grid, IconButton, Chip, Paper, Divider } from '@mui/material';
 import { CheckCircle, Warning, Error as ErrorIcon, Refresh } from '@mui/icons-material';
 import { apiService } from '../../services/api';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 interface TableQuality {
   table: string;
@@ -31,6 +32,7 @@ interface DataQualityMetricsProps {
 }
 
 export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshKey = 0 }) => {
+  const colors = useThemeColors();
   const [quality, setQuality] = useState<QualityMetrics>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -112,9 +114,9 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
 
   if (loading && totalTables === 0) {
     return (
-      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+      <Card elevation={0} sx={{ bgcolor: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+          <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
             Loading quality metrics...
           </Typography>
         </CardContent>
@@ -124,13 +126,13 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
 
   if (error && totalTables === 0) {
     return (
-      <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+      <Card elevation={0} sx={{ bgcolor: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
           <ErrorIcon sx={{ color: '#ef4444', fontSize: 40, mb: 1.5 }} />
           <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', mb: 0.5, fontSize: '1rem' }}>
             Error Loading Quality Metrics
           </Typography>
-          <Typography variant="body2" sx={{ color: '#64748b', mb: 2, fontSize: '0.875rem' }}>
+          <Typography variant="body2" sx={{ color: colors.textSecondary, mb: 2, fontSize: '0.875rem' }}>
             {error}
           </Typography>
           <IconButton onClick={fetchQuality} sx={{ color: '#6366f1', '&:hover': { backgroundColor: '#f1f5f9' } }}>
@@ -160,7 +162,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
     return (
       <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <CheckCircle sx={{ color: '#64748b', fontSize: 48, mb: 2 }} />
+          <CheckCircle sx={{ color: colors.textSecondary, fontSize: 48, mb: 2 }} />
           <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', mb: 1 }}>
             No Quality Data Available
           </Typography>
@@ -191,7 +193,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
   };
 
   return (
-    <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2, height: '100%' }}>
+    <Card elevation={0} sx={{ bgcolor: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2, height: '100%' }}>
       <CardContent sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography
@@ -219,7 +221,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
         {totalTables === 0 ? (
           <Box sx={{ textAlign: 'center', py: 6 }}>
             <CheckCircle sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
-            <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+            <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
               No quality data available
             </Typography>
           </Box>
@@ -239,7 +241,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
                     elevation={0}
                     sx={{
                       p: 2.5,
-                      background: '#ffffff',
+                      bgcolor: colors.paper,
                       border: `1px solid ${layerColor}30`,
                       borderRadius: 1.5,
                       transition: 'all 0.2s ease',
@@ -271,7 +273,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
                           <Typography variant="body2" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.875rem', mb: 0.25 }}>
                             {layerNames[layer as keyof typeof layerNames]}
                           </Typography>
-                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                          <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem' }}>
                             {layerData.tables.length} datasets
                           </Typography>
                         </Box>
@@ -307,7 +309,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
 
                     {/* Top Failing Rules */}
                     <Box>
-                      <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600, display: 'block', mb: 1.5 }}>
+                      <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem', fontWeight: 600, display: 'block', mb: 1.5 }}>
                         Top Failing Rules
                       </Typography>
                       {topFailingRules.length > 0 ? (
@@ -318,7 +320,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
                               sx={{
                                 p: 1.5,
                                 borderRadius: 1,
-                                background: index === 0 ? '#fffbeb' : '#f8fafc',
+                                background: index === 0 ? `${colors.warningLight}80` : colors.background,
                                 border: `1px solid ${index === 0 ? '#fde68a' : '#e2e8f0'}`,
                                 display: 'flex',
                                 justifyContent: 'space-between',
@@ -353,7 +355,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
                       ) : (
                         <Box sx={{ textAlign: 'center', py: 2 }}>
                           <CheckCircle sx={{ fontSize: 24, color: '#10b981', mb: 1 }} />
-                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                          <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem' }}>
                             No failing rules detected
                           </Typography>
                         </Box>

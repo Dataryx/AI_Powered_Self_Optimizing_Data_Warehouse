@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Card, CardContent, Typography, Box } from '@mui/material';
 import { TrendingUp, TrendingDown } from '@mui/icons-material';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 interface StatCardProps {
   title: string;
@@ -34,8 +35,8 @@ export const StatCard: React.FC<StatCardProps> = ({
         height: '100%',
         position: 'relative',
         overflow: 'hidden',
-        background: `linear-gradient(135deg, ${color}08 0%, ${color}03 50%, #ffffff 100%)`,
-        border: `1px solid ${color}20`,
+        background: `linear-gradient(135deg, ${accent}08 0%, ${accent}03 50%, ${colors.paper} 100%)`,
+        border: `1px solid ${accent}20`,
         backdropFilter: 'blur(10px)',
         transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
         cursor: 'pointer',
@@ -46,15 +47,15 @@ export const StatCard: React.FC<StatCardProps> = ({
           left: 0,
           right: 0,
           height: '4px',
-          background: `linear-gradient(90deg, ${color} 0%, ${color}80 100%)`,
+          background: `linear-gradient(90deg, ${accent} 0%, ${accent}80 100%)`,
           transform: isHovered ? 'scaleX(1)' : 'scaleX(0)',
           transformOrigin: 'left',
           transition: 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
         },
         '&:hover': {
           transform: 'translateY(-8px) scale(1.02)',
-          boxShadow: `0 20px 40px -12px ${color}40, 0 0 0 1px ${color}15`,
-          borderColor: `${color}40`,
+          boxShadow: `0 20px 40px -12px ${accent}40, 0 0 0 1px ${accent}15`,
+          borderColor: `${accent}40`,
         },
       }}
     >
@@ -64,8 +65,8 @@ export const StatCard: React.FC<StatCardProps> = ({
             sx={{
               p: 1.5,
               borderRadius: 2,
-              background: `linear-gradient(135deg, ${color}15 0%, ${color}08 100%)`,
-              color: color,
+              background: `linear-gradient(135deg, ${accent}15 0%, ${accent}08 100%)`,
+              color: accent,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -85,8 +86,8 @@ export const StatCard: React.FC<StatCardProps> = ({
                 px: 1.5,
                 py: 0.5,
                 borderRadius: 2,
-                backgroundColor: trend >= 0 ? '#10b98120' : '#ef444420',
-                color: trend >= 0 ? '#10b981' : '#ef4444',
+                backgroundColor: trend >= 0 ? `${colors.success}20` : `${colors.error}20`,
+                color: trend >= 0 ? colors.success : colors.error,
                 fontSize: '0.75rem',
                 fontWeight: 600,
               }}
@@ -103,7 +104,7 @@ export const StatCard: React.FC<StatCardProps> = ({
           sx={{
             fontWeight: 700,
             mb: 0.5,
-            background: `linear-gradient(135deg, ${color} 0%, ${color}80 100%)`,
+            background: `linear-gradient(135deg, ${accent} 0%, ${accent}80 100%)`,
             backgroundClip: 'text',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',

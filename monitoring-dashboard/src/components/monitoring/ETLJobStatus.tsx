@@ -8,6 +8,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, Typography, Box, Chip, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
 import { CheckCircle, Error as ErrorIcon, Refresh, Schedule, TrendingUp, TrendingDown, Warning } from '@mui/icons-material';
 import { apiService } from '../../services/api';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 interface ETLJob {
   job_id: string;
@@ -26,6 +27,7 @@ interface ETLJobStatusProps {
 }
 
 export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) => {
+  const colors = useThemeColors();
   const [jobs, setJobs] = useState<ETLJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
@@ -156,17 +158,17 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
     switch (status.toLowerCase()) {
       case 'completed':
       case 'success':
-        return <CheckCircle sx={{ color: '#10b981', fontSize: 20 }} />;
+        return <CheckCircle sx={{ color: colors.success, fontSize: 20 }} />;
       case 'running':
       case 'in_progress':
-        return <Schedule sx={{ color: '#6366f1', fontSize: 20 }} />;
+        return <Schedule sx={{ color: colors.primary, fontSize: 20 }} />;
       case 'slow':
-        return <Warning sx={{ color: '#f59e0b', fontSize: 20 }} />;
+        return <Warning sx={{ color: colors.warning, fontSize: 20 }} />;
       case 'failed':
       case 'error':
-        return <ErrorIcon sx={{ color: '#ef4444', fontSize: 20 }} />;
+        return <ErrorIcon sx={{ color: colors.error, fontSize: 20 }} />;
       default:
-        return <Schedule sx={{ color: '#64748b', fontSize: 20 }} />;
+        return <Schedule sx={{ color: colors.textSecondary, fontSize: 20 }} />;
     }
   };
 
@@ -174,17 +176,17 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
     switch (status.toLowerCase()) {
       case 'completed':
       case 'success':
-        return { bg: '#10b98120', color: '#10b981', border: '#10b98140' };
+        return { bg: `${colors.success}20`, color: colors.success, border: `${colors.success}40` };
       case 'running':
       case 'in_progress':
-        return { bg: '#6366f120', color: '#6366f1', border: '#6366f140' };
+        return { bg: `${colors.primary}20`, color: colors.primary, border: `${colors.primary}40` };
       case 'slow':
-        return { bg: '#f59e0b20', color: '#f59e0b', border: '#f59e0b40' };
+        return { bg: `${colors.warning}20`, color: colors.warning, border: `${colors.warning}40` };
       case 'failed':
       case 'error':
-        return { bg: '#ef444420', color: '#ef4444', border: '#ef444440' };
+        return { bg: `${colors.error}20`, color: colors.error, border: `${colors.error}40` };
       default:
-        return { bg: '#64748b20', color: '#64748b', border: '#64748b40' };
+        return { bg: `${colors.textSecondary}20`, color: colors.textSecondary, border: `${colors.textSecondary}40` };
     }
   };
 
@@ -201,7 +203,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
 
   if (loading && jobs.length === 0 && !error) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(99, 102, 241, 0.1)' }}>
+      <Card sx={{ background: `linear-gradient(135deg, ${colors.paper} 0%, ${colors.background} 100%)`, border: `1px solid ${colors.primary}30` }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
           <Typography>Loading ETL jobs...</Typography>
         </CardContent>
@@ -211,10 +213,10 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
 
   if (error) {
     return (
-      <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
+      <Card sx={{ background: `linear-gradient(135deg, ${colors.paper} 0%, ${colors.background} 100%)`, border: `1px solid ${colors.error}30` }}>
         <CardContent sx={{ p: 3, textAlign: 'center' }}>
-          <ErrorIcon sx={{ color: '#ef4444', fontSize: 48, mb: 2 }} />
-          <Typography variant="h6" sx={{ fontWeight: 700, color: '#ef4444', mb: 1 }}>
+          <ErrorIcon sx={{ color: colors.error, fontSize: 48, mb: 2 }} />
+          <Typography variant="h6" sx={{ fontWeight: 700, color: colors.error, mb: 1 }}>
             Error Loading ETL Jobs
           </Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
@@ -291,7 +293,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
               variant="h6"
               sx={{
                 fontWeight: 600,
-                color: '#0f172a',
+                color: colors.text,
                 fontSize: '1rem',
                 mb: 0.5,
               }}
@@ -319,7 +321,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
               size="small"
               onClick={fetchJobs}
               sx={{
-                color: '#6366f1',
+                color: colors.primary,
                 '&:hover': { backgroundColor: '#f1f5f9' },
               }}
             >
@@ -339,7 +341,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
           <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 1.5 }}>
             <Table sx={{ minWidth: 650 }}>
               <TableHead>
-                <TableRow sx={{ backgroundColor: '#f8fafc' }}>
+                <TableRow sx={{ backgroundColor: colors.background }}>
                   <TableCell sx={{ fontWeight: 600, color: '#475569', fontSize: '0.8125rem', py: 1.5, borderBottom: '1px solid #e2e8f0' }}>
                     Pipeline
                   </TableCell>
@@ -372,12 +374,12 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
                   <TableRow
                     key={job.job_id}
                     sx={{
-                      '&:hover': { backgroundColor: '#f8fafc' },
+                      '&:hover': { backgroundColor: colors.background },
                       '&:last-child td': { borderBottom: 0 },
                     }}
                   >
                     <TableCell sx={{ py: 2 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.875rem' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: colors.text, fontSize: '0.875rem' }}>
                         {job.job_name}
                       </Typography>
                     </TableCell>
@@ -400,7 +402,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
                       />
                     </TableCell>
                     <TableCell sx={{ py: 2 }}>
-                      <Typography variant="body2" sx={{ color: '#0f172a', fontSize: '0.875rem', fontWeight: 500 }}>
+                      <Typography variant="body2" sx={{ color: colors.text, fontSize: '0.875rem', fontWeight: 500 }}>
                         {formatDuration(duration)}
                       </Typography>
                     </TableCell>
@@ -408,14 +410,14 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
                       {baselineDelta ? (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                           {baselineDelta.delta > 0 ? (
-                            <TrendingUp sx={{ fontSize: 14, color: '#dc2626' }} />
+                            <TrendingUp sx={{ fontSize: 14, color: colors.error }} />
                           ) : (
                             <TrendingDown sx={{ fontSize: 14, color: '#16a34a' }} />
                           )}
                           <Typography
                             variant="body2"
                             sx={{
-                              color: baselineDelta.delta > 0 ? '#dc2626' : '#16a34a',
+                              color: baselineDelta.delta > 0 ? colors.error : colors.success,
                               fontSize: '0.875rem',
                               fontWeight: 500,
                             }}
@@ -430,7 +432,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
                       )}
                     </TableCell>
                     <TableCell sx={{ py: 2 }}>
-                      <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+                      <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
                         {runTime}
                       </Typography>
                     </TableCell>

@@ -6,6 +6,7 @@
 import React from 'react';
 import { Card, CardContent, Typography, Box, Grid } from '@mui/material';
 import { Storage, TableChart, DataObject } from '@mui/icons-material';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 interface WarehouseOverviewProps {
   summary: {
@@ -16,7 +17,7 @@ interface WarehouseOverviewProps {
 }
 
 export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary }) => {
-  // Ensure summary has all required properties with defaults
+  const colors = useThemeColors();
   const safeSummary = {
     bronze: summary?.bronze || { table_count: 0, estimated_rows: 0, total_size: '0 MB' },
     silver: summary?.silver || { table_count: 0, estimated_rows: 0, total_size: '0 MB' },
@@ -27,8 +28,8 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
     {
       name: 'Bronze Layer',
       data: safeSummary.bronze,
-      color: '#f59e0b',
-      bgColor: '#fef3c7', // Light pink/beige background
+      color: colors.layerBronze.text,
+      bgColor: colors.layerBronze.bg,
       icon: <Storage sx={{ fontSize: 14 }} />,
       mainValue: safeSummary.bronze.table_count.toString(),
       subtitle: `${safeSummary.bronze.estimated_rows.toLocaleString()} rows`,
@@ -36,8 +37,8 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
     {
       name: 'Silver Layer',
       data: safeSummary.silver,
-      color: '#6366f1',
-      bgColor: '#e0e7ff', // Light blue background
+      color: colors.layerSilver.text,
+      bgColor: colors.layerSilver.bg,
       icon: <TableChart sx={{ fontSize: 14 }} />,
       mainValue: safeSummary.silver.table_count.toString(),
       subtitle: `${safeSummary.silver.estimated_rows.toLocaleString()} rows`,
@@ -45,8 +46,8 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
     {
       name: 'Gold Layer',
       data: safeSummary.gold,
-      color: '#10b981',
-      bgColor: '#d1fae5', // Light green background
+      color: colors.layerGold.text,
+      bgColor: colors.layerGold.bg,
       icon: <DataObject sx={{ fontSize: 14 }} />,
       mainValue: safeSummary.gold.table_count.toString(),
       subtitle: `${safeSummary.gold.estimated_rows.toLocaleString()} rows`,
@@ -57,7 +58,7 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
     <Card
       sx={{
         borderRadius: 2,
-        background: '#ffffff',
+        bgcolor: colors.paper,
         border: '1px solid #e5e7eb',
         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
         height: '100%',
@@ -68,7 +69,7 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
           variant="h6"
           sx={{
             fontWeight: 600,
-            color: '#1f2937',
+            color: colors.text,
             fontSize: '0.875rem',
             mb: 1,
             flexShrink: 0,
@@ -117,7 +118,7 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
                     variant="h6"
                     sx={{
                       fontWeight: 700,
-                      color: '#1f2937',
+                      color: colors.text,
                       fontSize: '0.875rem',
                       lineHeight: 1.2,
                       mb: 0.3,
@@ -128,7 +129,7 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
                   <Typography
                     variant="caption"
                     sx={{
-                      color: '#6b7280',
+                      color: colors.textSecondary,
                       fontSize: '0.65rem',
                       fontWeight: 500,
                       mb: 0.25,
@@ -141,7 +142,7 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
                   <Typography
                     variant="caption"
                     sx={{
-                      color: '#3b82f6',
+                      color: colors.primary,
                       fontSize: '0.6rem',
                       fontWeight: 500,
                       lineHeight: 1.3,
@@ -158,6 +159,3 @@ export const WarehouseOverview: React.FC<WarehouseOverviewProps> = ({ summary })
     </Card>
   );
 };
-
-
-
