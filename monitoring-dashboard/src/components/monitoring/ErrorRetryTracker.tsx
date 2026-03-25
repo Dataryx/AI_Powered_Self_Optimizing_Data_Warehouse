@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Card, CardContent, Typography, Box, Chip, IconButton, Paper, Divider } from '@mui/material';
+import { Card, CardContent, Typography, Box, Chip, IconButton, Paper } from '@mui/material';
 import { Error as ErrorIcon, Warning, Refresh, CheckCircle, Info } from '@mui/icons-material';
 import { apiService } from '../../services/api';
 import { useThemeColors } from '../../theme/useThemeColors';
@@ -33,15 +33,13 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
   const [errors, setErrors] = useState<ETLError[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastFetch, setLastFetch] = useState<Date | null>(null);
 
   const fetchErrors = useCallback(async () => {
     try {
       setError(null);
-      const data = await apiService.getETLErrors();
+      const data = (await apiService.getETLErrors()) as any;
       console.log('Fetched ETL errors:', data);
-      setErrors(data.errors || []);
-      setLastFetch(new Date());
+      setErrors(data?.errors || []);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching ETL errors:', err);
@@ -128,15 +126,6 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
   }
 
   const activeErrors = errors.filter(e => e.status === 'active');
-  const errorCounts = {
-    total: errors.length,
-    active: activeErrors.length,
-    bySeverity: {
-      critical: errors.filter(e => e.severity === 'critical').length,
-      warning: errors.filter(e => e.severity === 'warning').length,
-      info: errors.filter(e => e.severity === 'info').length,
-    },
-  };
 
   return (
     <Card elevation={0} sx={{ bgcolor: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
@@ -146,7 +135,7 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
             variant="h6"
             sx={{
               fontWeight: 600,
-              color: colors.text,
+              color: '#fff',
               fontSize: '1rem',
             }}
           >
@@ -158,12 +147,12 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
                 label={`${activeErrors.length} active`}
                 size="small"
                 sx={{
-                  backgroundColor: '#fef2f2',
-                  color: '#dc2626',
+                  backgroundColor: colors.errorLight,
+                  color: colors.error,
                   fontWeight: 600,
                   fontSize: '0.75rem',
                   height: '24px',
-                  border: '1px solid #fecaca',
+                  border: `1px solid ${colors.error}30`,
                 }}
               />
             )}
@@ -172,7 +161,7 @@ export const ErrorRetryTracker: React.FC<ErrorRetryTrackerProps> = ({ refreshKey
               onClick={fetchErrors}
               sx={{
                 color: colors.primary,
-                '&:hover': { backgroundColor: '#f1f5f9' },
+                '&:hover': { backgroundColor: colors.background },
               }}
             >
               <Refresh sx={{ fontSize: 18 }} />

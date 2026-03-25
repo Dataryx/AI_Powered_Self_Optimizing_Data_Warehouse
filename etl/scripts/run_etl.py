@@ -117,7 +117,35 @@ def run_etl_pipeline(batch_size=1000):
         except Exception as e:
             logger.warning(f"[WARN] Could not initialize job tracker: {e}")
             tracker = None
-    
+
+    def is_pipeline_job_active(conn):
+        """Return False if job is set to inactive (active_status='I'), so we can halt from system."""
+        try:
+            conn.rollback()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COALESCE(TRIM(active_status), '') AS active_status
+                FROM monitoring.etl_jobs
+                WHERE job_name = %s AND job_type = %s
+                LIMIT 1
+                """,
+                ("Complete ETL Pipeline", "pipeline"),
+            )
+            row = cur.fetchone()
+            cur.close()
+            if row is None:
+                return True
+            return (row[0] or "").strip().upper() != "I"
+        except Exception:
+            return True
+
+    # Respect active_status: when 'I', exit immediately. Scheduler only runs active jobs,
+    # so inactive pipeline is never started in the background.
+    if not is_pipeline_job_active(connection):
+        logger.info("Complete ETL Pipeline job is inactive (active_status=I). Exiting without running.")
+        return
+
     # Get initial counts - ensure transaction is clean first
     try:
         connection.rollback()  # Start with clean transaction
@@ -216,6 +244,16 @@ def run_etl_pipeline(batch_size=1000):
         if tracker and pipeline_job_id:
             tracker.update_progress(pipeline_job_id, 50)
         
+        # Halt from system: if job was set to inactive, stop now
+        if not is_pipeline_job_active(connection):
+            logger.info("Job set to inactive (active_status=I). Halting pipeline after Bronze->Silver.")
+            if tracker and pipeline_job_id:
+                try:
+                    tracker.fail_job(pipeline_job_id, "Halted: job set to inactive (active_status=I).")
+                except Exception:
+                    pass
+            return
+        
         # Step 2: Silver → Gold
         logger.info("")
         logger.info("=" * 80)
@@ -243,6 +281,16 @@ def run_etl_pipeline(batch_size=1000):
             before = gold_counts_before.get(table, 0)
             added = count - before
             logger.info(f"  {table:20s}: {count:>15,} records (+{added:>15,})")
+        
+        # Halt from system: if job was set to inactive, stop now
+        if not is_pipeline_job_active(connection):
+            logger.info("Job set to inactive (active_status=I). Halting pipeline after Silver->Gold.")
+            if tracker and pipeline_job_id:
+                try:
+                    tracker.fail_job(pipeline_job_id, "Halted: job set to inactive (active_status=I).")
+                except Exception:
+                    pass
+            return
         
         # Step 3: Validate for Duplicates
         logger.info("")
@@ -300,9 +348,20 @@ def run_etl_pipeline(batch_size=1000):
         logger.info("")
         logger.info("=" * 80)
         
+    except KeyboardInterrupt:
+        if tracker and pipeline_job_id:
+            try:
+                tracker.fail_job(pipeline_job_id, "Interrupted by user (KeyboardInterrupt).")
+            except Exception as fe:
+                logger.warning("Could not persist job failure after interrupt: %s", fe)
+        logger.error("ETL pipeline interrupted by user.")
+        raise
     except Exception as e:
         if tracker and pipeline_job_id:
-            tracker.fail_job(pipeline_job_id, str(e))
+            try:
+                tracker.fail_job(pipeline_job_id, str(e))
+            except Exception as fe:
+                logger.error("Could not mark job run failed in DB (connection may be closed): %s", fe)
         logger.error("")
         logger.error("=" * 80)
         logger.error("ETL PIPELINE FAILED!")

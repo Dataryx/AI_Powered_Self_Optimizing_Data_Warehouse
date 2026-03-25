@@ -20,6 +20,7 @@ class QueryTimePredictorConfig:
     random_state: int = 42
     n_jobs: int = -1
     feature_names: List[str] = None
+    min_samples_for_training: int = 10
 
 
 @dataclass

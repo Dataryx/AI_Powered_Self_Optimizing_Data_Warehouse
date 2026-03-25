@@ -8,7 +8,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardContent, Typography, Box, Paper, Chip, Tooltip } from '@mui/material';
 import { ArrowForward, DataObject, Storage, TableChart, Transform, CheckCircle, Warning, Error as ErrorIcon } from '@mui/icons-material';
 import { apiService } from '../../services/api';
-import { useThemeColors } from '../../theme/useThemeColors';
+import { colors as lightColors } from '../../theme/colors';
 
 interface DAGNode {
   id: string;
@@ -38,7 +38,8 @@ interface ETLJob {
 }
 
 export const PipelineDAG: React.FC<PipelineDAGProps> = ({ refreshKey = 0 }) => {
-  const colors = useThemeColors();
+  // Force a white/light surface for lineage visualization, even in dark mode.
+  const colors = lightColors;
   const [nodes, setNodes] = useState<DAGNode[]>([]);
   const [edges, setEdges] = useState<DAGEdge[]>([]);
   const [etlJobs, setEtlJobs] = useState<ETLJob[]>([]);

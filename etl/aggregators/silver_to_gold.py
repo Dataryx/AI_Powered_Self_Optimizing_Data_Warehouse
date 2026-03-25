@@ -6,7 +6,7 @@ Updated to work with the actual schema: gold.agg_daily_sales, gold.agg_customer_
 
 import psycopg2
 from datetime import datetime, date, timedelta
-from typing import Dict, Any
+from typing import Any, Dict, List
 import logging
 import time
 
@@ -30,6 +30,65 @@ class SilverToGoldAggregator:
         except Exception as e:
             logger.error(f"Error checking if {schema}.{table} is empty: {e}")
             return False
+    
+    def _ensure_dim_date_for_order_dates(self) -> None:
+        """Ensure gold.dim_date contains every distinct order_date present in silver.orders."""
+        logger.info(
+            "Ensuring dim_date has all order dates (scanning silver.orders; "
+            "this may take several minutes on very large tables)..."
+        )
+        t0 = time.time()
+        self.cursor.execute("""
+            WITH distinct_order_dates AS (
+                SELECT DISTINCT order_date AS d
+                FROM silver.orders
+                WHERE order_date IS NOT NULL
+            )
+            SELECT d.d
+            FROM distinct_order_dates d
+            WHERE NOT EXISTS (
+                SELECT 1 FROM gold.dim_date g WHERE g.full_date = d.d
+            )
+            ORDER BY 1
+        """)
+        missing_dates: List[Any] = [row[0] for row in self.cursor.fetchall()]
+        elapsed = time.time() - t0
+        logger.info(
+            "  dim_date gap scan complete in %.1fs (%s dates missing from dim_date)",
+            elapsed,
+            f"{len(missing_dates):,}",
+        )
+        if not missing_dates:
+            return
+        logger.info(f"  Inserting {len(missing_dates):,} missing dim_date rows...")
+        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        month_names = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December']
+        month_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        for order_date in missing_dates:
+            date_key = int(order_date.strftime('%Y%m%d'))
+            day_of_week = order_date.weekday() + 1
+            quarter = (order_date.month - 1) // 3 + 1
+            try:
+                self.cursor.execute("""
+                    INSERT INTO gold.dim_date (
+                        date_key, full_date, day_of_week, day_name, day_of_month, day_of_year,
+                        week_of_year, month_number, month_name, month_short_name,
+                        quarter_number, quarter_name, year_number, is_weekend
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (date_key) DO NOTHING
+                """, (
+                    date_key, order_date, day_of_week, day_names[order_date.weekday()],
+                    order_date.day, order_date.timetuple().tm_yday,
+                    order_date.isocalendar()[1], order_date.month,
+                    month_names[order_date.month - 1], month_short[order_date.month - 1],
+                    quarter, f"Q{quarter}", order_date.year, order_date.weekday() >= 5
+                ))
+            except Exception as e:
+                logger.warning(f"  Error inserting date {order_date}: {e}")
+        self.connection.commit()
+        logger.info(f"  Populated {len(missing_dates):,} missing dates in dim_date")
     
     def aggregate_daily_sales(self, target_date: date = None, force_refresh: bool = False):
         """Aggregate daily sales for a specific date into gold.agg_daily_sales."""
@@ -786,11 +845,12 @@ class SilverToGoldAggregator:
             return 0
     
     def populate_fact_sales(self, force_refresh: bool = False):
-        """Populate fact_sales from silver orders and order_items."""
-        if not force_refresh and not self.table_is_empty('gold', 'fact_sales'):
-            logger.info("[SKIP] gold.fact_sales already has data; skipping.")
-            return 0
-        
+        """Populate fact_sales from silver orders and order_items.
+
+        Always full-refresh from Silver when data exists (no one-time skip).
+        Previously, non-empty fact_sales caused every later ETL run to skip this
+        step, so dashboards showed stale daily_sales (e.g. last date frozen).
+        """
         # Check prerequisite tables
         try:
             self.connection.rollback()  # Ensure clean transaction
@@ -808,49 +868,14 @@ class SilverToGoldAggregator:
             logger.warning("  [WARN] Ensure silver.orders and silver.order_item are populated first")
             return 0
         
-        # Ensure dim_date has all dates from orders
-        logger.info("Ensuring dim_date has all order dates...")
-        self.cursor.execute("""
-            SELECT DISTINCT order_date
-            FROM silver.orders
-            WHERE order_date IS NOT NULL
-            AND order_date NOT IN (SELECT full_date FROM gold.dim_date)
-        """)
-        missing_dates = [row[0] for row in self.cursor.fetchall()]
-        if missing_dates:
-            logger.info(f"  Found {len(missing_dates)} missing dates - populating...")
-            for order_date in missing_dates:
-                date_key = int(order_date.strftime('%Y%m%d'))
-                day_of_week = order_date.weekday() + 1
-                day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                month_names = ['January', 'February', 'March', 'April', 'May', 'June',
-                              'July', 'August', 'September', 'October', 'November', 'December']
-                month_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-                quarter = (order_date.month - 1) // 3 + 1
-                
-                try:
-                    self.cursor.execute("""
-                        INSERT INTO gold.dim_date (
-                            date_key, full_date, day_of_week, day_name, day_of_month, day_of_year,
-                            week_of_year, month_number, month_name, month_short_name,
-                            quarter_number, quarter_name, year_number, is_weekend
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (date_key) DO NOTHING
-                    """, (
-                        date_key, order_date, day_of_week, day_names[order_date.weekday()],
-                        order_date.day, order_date.timetuple().tm_yday,
-                        order_date.isocalendar()[1], order_date.month,
-                        month_names[order_date.month - 1], month_short[order_date.month - 1],
-                        quarter, f"Q{quarter}", order_date.year, order_date.weekday() >= 5
-                    ))
-                except Exception as e:
-                    logger.warning(f"  Error inserting date {order_date}: {e}")
-            self.connection.commit()
-            logger.info(f"  Populated {len(missing_dates)} missing dates")
+        self._ensure_dim_date_for_order_dates()
         
-        if force_refresh:
-            self.cursor.execute("DELETE FROM gold.fact_sales")
+        # Replace gold rows each run so order_date_key matches current silver.orders
+        logger.info(
+            "Replacing gold.fact_sales (DELETE + INSERT join orders/order_item; "
+            "may take several minutes for millions of rows)..."
+        )
+        self.cursor.execute("DELETE FROM gold.fact_sales")
         
         query = """
             INSERT INTO gold.fact_sales (
@@ -888,13 +913,19 @@ class SilverToGoldAggregator:
         """
         
         try:
+            t_ins = time.time()
             self.cursor.execute(query)
+            ins_elapsed = time.time() - t_ins
             count = self.cursor.rowcount
             self.connection.commit()
             if count == 0:
                 logger.warning("[WARN] No records inserted into fact_sales - check JOIN conditions and data quality")
             else:
-                logger.info(f"Populated {count:,} sales fact records")
+                logger.info(
+                    "Populated %s sales fact records (INSERT took %.1fs)",
+                    f"{count:,}",
+                    ins_elapsed,
+                )
             return count
         except Exception as e:
             logger.error(f"[ERROR] Error populating sales fact: {e}", exc_info=True)
@@ -902,11 +933,10 @@ class SilverToGoldAggregator:
             return 0
     
     def populate_fact_orders(self, force_refresh: bool = False):
-        """Populate fact_orders from silver orders."""
-        if not force_refresh and not self.table_is_empty('gold', 'fact_orders'):
-            logger.info("[SKIP] gold.fact_orders already has data; skipping.")
-            return 0
-        
+        """Populate fact_orders from silver orders.
+
+        Always full-refresh from Silver when data exists (same rationale as fact_sales).
+        """
         # Check prerequisite tables
         try:
             self.connection.rollback()  # Ensure clean transaction
@@ -924,49 +954,13 @@ class SilverToGoldAggregator:
             logger.warning("  [WARN] Ensure silver.orders and silver.order_item are populated first")
             return 0
         
-        # Ensure dim_date has all dates from orders
-        logger.info("Ensuring dim_date has all order dates...")
-        self.cursor.execute("""
-            SELECT DISTINCT order_date
-            FROM silver.orders
-            WHERE order_date IS NOT NULL
-            AND order_date NOT IN (SELECT full_date FROM gold.dim_date)
-        """)
-        missing_dates = [row[0] for row in self.cursor.fetchall()]
-        if missing_dates:
-            logger.info(f"  Found {len(missing_dates)} missing dates - populating...")
-            for order_date in missing_dates:
-                date_key = int(order_date.strftime('%Y%m%d'))
-                day_of_week = order_date.weekday() + 1
-                day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                month_names = ['January', 'February', 'March', 'April', 'May', 'June',
-                              'July', 'August', 'September', 'October', 'November', 'December']
-                month_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-                quarter = (order_date.month - 1) // 3 + 1
-                
-                try:
-                    self.cursor.execute("""
-                        INSERT INTO gold.dim_date (
-                            date_key, full_date, day_of_week, day_name, day_of_month, day_of_year,
-                            week_of_year, month_number, month_name, month_short_name,
-                            quarter_number, quarter_name, year_number, is_weekend
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (date_key) DO NOTHING
-                    """, (
-                        date_key, order_date, day_of_week, day_names[order_date.weekday()],
-                        order_date.day, order_date.timetuple().tm_yday,
-                        order_date.isocalendar()[1], order_date.month,
-                        month_names[order_date.month - 1], month_short[order_date.month - 1],
-                        quarter, f"Q{quarter}", order_date.year, order_date.weekday() >= 5
-                    ))
-                except Exception as e:
-                    logger.warning(f"  Error inserting date {order_date}: {e}")
-            self.connection.commit()
-            logger.info(f"  Populated {len(missing_dates)} missing dates")
+        self._ensure_dim_date_for_order_dates()
         
-        if force_refresh:
-            self.cursor.execute("DELETE FROM gold.fact_orders")
+        logger.info(
+            "Replacing gold.fact_orders (DELETE + grouped INSERT; "
+            "may take several minutes for millions of rows)..."
+        )
+        self.cursor.execute("DELETE FROM gold.fact_orders")
         
         query = """
             INSERT INTO gold.fact_orders (
@@ -1007,13 +1001,19 @@ class SilverToGoldAggregator:
         """
         
         try:
+            t_ins = time.time()
             self.cursor.execute(query)
+            ins_elapsed = time.time() - t_ins
             count = self.cursor.rowcount
             self.connection.commit()
             if count == 0:
                 logger.warning("[WARN] No records inserted into fact_orders - check JOIN conditions and data quality")
             else:
-                logger.info(f"Populated {count:,} orders fact records")
+                logger.info(
+                    "Populated %s orders fact records (INSERT took %.1fs)",
+                    f"{count:,}",
+                    ins_elapsed,
+                )
             return count
         except Exception as e:
             logger.error(f"[ERROR] Error populating orders fact: {e}", exc_info=True)
@@ -1034,10 +1034,36 @@ class SilverToGoldAggregator:
         
         logger.info(f"Populating inventory snapshot fact for {snapshot_date}...")
         
-        # Ensure date dimension exists
+        # Ensure date dimension exists (populate_dim_date skips when table not empty, so insert single date if missing)
         self.cursor.execute("SELECT 1 FROM gold.dim_date WHERE date_key = %s", (date_key,))
         if not self.cursor.fetchone():
             self.populate_dim_date(snapshot_date, snapshot_date)
+            # If dim_date had other rows, populate_dim_date may have skipped; ensure this date exists
+            self.cursor.execute("SELECT 1 FROM gold.dim_date WHERE date_key = %s", (date_key,))
+            if not self.cursor.fetchone():
+                day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                month_names = ['January', 'February', 'March', 'April', 'May', 'June',
+                              'July', 'August', 'September', 'October', 'November', 'December']
+                month_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                d = snapshot_date
+                day_of_week = d.weekday() + 1
+                quarter = (d.month - 1) // 3 + 1
+                self.cursor.execute("""
+                    INSERT INTO gold.dim_date (
+                        date_key, full_date, day_of_week, day_name, day_of_month, day_of_year,
+                        week_of_year, month_number, month_name, month_short_name,
+                        quarter_number, quarter_name, year_number, is_weekend
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (date_key) DO NOTHING
+                """, (
+                    date_key, d, day_of_week, day_names[d.weekday()],
+                    d.day, d.timetuple().tm_yday,
+                    d.isocalendar()[1], d.month,
+                    month_names[d.month - 1], month_short[d.month - 1],
+                    quarter, f"Q{quarter}", d.year, d.weekday() >= 5
+                ))
+                self.connection.commit()
         
         # If force_refresh, delete existing snapshot for this date
         if force_refresh:
@@ -1290,17 +1316,10 @@ class SilverToGoldAggregator:
         logger.info("Processing all dates in data range...")
         logger.info("")
         
+        # Job tracking: only "Complete ETL Pipeline" is tracked at run_etl.py level.
+        # Do not create extra jobs in monitoring.etl_jobs (only two jobs allowed).
         daily_job_id = None
-        if self.tracker:
-            daily_job_id = self.tracker.start_job(
-                "GOLD - Daily Sales Aggregation",
-                "aggregation",
-                "gold",
-                "daily_sales_summary",
-                None
-            )
-            self.tracker.update_progress(daily_job_id, 0)
-        
+
         daily_start = time.time()
         daily_skipped = 0
         daily_processed = 0
@@ -1387,10 +1406,6 @@ class SilverToGoldAggregator:
         
         daily_elapsed = time.time() - daily_start
         totals['daily_sales'] = daily_processed
-        
-        if self.tracker and daily_job_id:
-            self.tracker.update_progress(daily_job_id, 100, total_checked)
-            self.tracker.complete_job(daily_job_id, total_checked)
         
         logger.info("")
         logger.info(f"[OK] Daily Sales Aggregation Complete")

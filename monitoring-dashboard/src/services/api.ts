@@ -71,6 +71,17 @@ class ApiService {
     return this.request('/monitoring/etl/jobs');
   }
 
+  async getETLJobDefinitions() {
+    return this.request('/monitoring/etl/job-definitions');
+  }
+
+  async runETLJob(jobName: string) {
+    return this.request('/monitoring/etl/run', {
+      method: 'POST',
+      body: JSON.stringify({ job_name: jobName }),
+    });
+  }
+
   async getPipelineDAG() {
     return this.request('/monitoring/etl/pipeline-dag');
   }

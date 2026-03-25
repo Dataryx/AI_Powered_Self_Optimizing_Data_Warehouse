@@ -1,5 +1,5 @@
 """
-Simple ETL scheduler that runs the full ETL pipeline every 5 minutes.
+Simple ETL scheduler that runs the full ETL pipeline every 2 minutes.
 
 This is an alternative to system cron and works on any platform
 (including Windows). Run it as a long‑lived process:
@@ -41,8 +41,8 @@ def run_once() -> int:
 
 
 def main() -> None:
-  interval_seconds = 5 * 60  # 5 minutes
-  print(f"ETL scheduler started – running every {interval_seconds} seconds (5 minutes).")
+  interval_seconds = 2 * 60  # 2 minutes
+  print(f"ETL scheduler started – running every {interval_seconds} seconds (2 minutes).")
 
   try:
     while True:

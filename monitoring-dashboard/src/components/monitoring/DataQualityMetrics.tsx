@@ -36,15 +36,13 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
   const [quality, setQuality] = useState<QualityMetrics>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastFetch, setLastFetch] = useState<Date | null>(null);
 
   const fetchQuality = useCallback(async () => {
     try {
       setError(null);
-      const data = await apiService.getDataQualityMetrics();
+      const data = (await apiService.getDataQualityMetrics()) as any;
       console.log('Fetched data quality metrics:', data);
-      setQuality(data.quality_metrics || {});
-      setLastFetch(new Date());
+      setQuality(data?.quality_metrics || {});
       setLoading(false);
     } catch (err) {
       console.error('Error fetching data quality metrics:', err);
@@ -59,18 +57,6 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
     const interval = setInterval(fetchQuality, 15000); // Refresh every 15 seconds
     return () => clearInterval(interval);
   }, [refreshKey, fetchQuality]);
-
-  const formatTimeAgo = (date: Date | null): string => {
-    if (!date) return 'Never';
-    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-    if (seconds < 10) return 'Just now';
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.floor(hours / 24)}d ago`;
-  };
 
   const getTotalTables = (): number => {
     return Object.values(quality).reduce((sum, layer) => sum + (layer.tables?.length || 0), 0);
@@ -147,17 +133,6 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
   const layerNames = { bronze: 'Bronze Layer', silver: 'Silver Layer', gold: 'Gold Layer' };
   const layerColors = { bronze: '#f59e0b', silver: '#6366f1', gold: '#10b981' };
 
-  // Prepare chart data
-  const chartData = layers.map((layer) => {
-    const layerData = quality[layer];
-    if (!layerData) return { layer, score: 0 };
-    return {
-      layer: layer.toUpperCase(),
-      score: layerData.average_quality_score,
-      color: layerColors[layer as keyof typeof layerColors],
-    };
-  });
-
   if (totalTables === 0 && !loading) {
     return (
       <Card sx={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
@@ -200,7 +175,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
             variant="h6"
             sx={{
               fontWeight: 600,
-              color: '#0f172a',
+              color: '#fff',
               fontSize: '1rem',
             }}
           >
@@ -210,8 +185,8 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
             size="small"
             onClick={fetchQuality}
             sx={{
-              color: '#6366f1',
-              '&:hover': { backgroundColor: '#f1f5f9' },
+              color: colors.primary,
+              '&:hover': { backgroundColor: colors.background },
             }}
           >
             <Refresh sx={{ fontSize: 18 }} />
@@ -220,7 +195,7 @@ export const DataQualityMetrics: React.FC<DataQualityMetricsProps> = ({ refreshK
 
         {totalTables === 0 ? (
           <Box sx={{ textAlign: 'center', py: 6 }}>
-            <CheckCircle sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
+            <CheckCircle sx={{ fontSize: 40, color: colors.textMuted, mb: 1.5 }} />
             <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
               No quality data available
             </Typography>

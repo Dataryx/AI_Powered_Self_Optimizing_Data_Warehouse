@@ -3,12 +3,16 @@ Warehouse Routes
 API routes for accessing data warehouse information.
 """
 
+import re
 from fastapi import APIRouter, HTTPException
 from typing import Optional
 from datetime import date, timedelta
 from ml_optimization.utils.db_utils import get_db_connection
 
 router = APIRouter()
+
+# Safe table/schema name pattern (alphanumeric and underscore only)
+SAFE_IDENT = re.compile(r"^[a-zA-Z0-9_]+$")
 
 
 @router.get("/schemas")
@@ -62,34 +66,78 @@ async def get_tables(schema: str):
 @router.get("/stats/{schema}/{table}")
 async def get_table_stats(schema: str, table: str):
     """Get statistics for a specific table."""
-    if schema not in ['bronze', 'silver', 'gold']:
+    if schema not in ("bronze", "silver", "gold"):
         raise HTTPException(status_code=400, detail="Schema must be bronze, silver, or gold")
+    if not SAFE_IDENT.match(table):
+        raise HTTPException(status_code=400, detail="Invalid table name")
     
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            qualified = f"{schema}.{table}"
+            quoted = '"' + schema.replace('"', '""') + '"."' + table.replace('"', '""') + '"'
             
-            # Get row count
-            cursor.execute(f"""
-                SELECT COUNT(*) 
-                FROM {schema}.{table}
-            """)
+            # Row count (identifiers validated above)
+            cursor.execute("SELECT COUNT(*) FROM " + quoted)
             row_count = cursor.fetchone()[0]
             
-            # Get table size
-            cursor.execute("""
-                SELECT pg_size_pretty(pg_total_relation_size(%s.%s)) as size,
-                       pg_total_relation_size(%s.%s) as size_bytes
-            """, (schema, table, schema, table))
+            # Table size: use qualified name as regclass (single parameter)
+            cursor.execute(
+                "SELECT pg_size_pretty(pg_total_relation_size(%s::regclass)) AS size, pg_total_relation_size(%s::regclass) AS size_bytes",
+                (qualified, qualified),
+            )
             size_info = cursor.fetchone()
             
+            # Column count and last updated (from pg_stat_user_tables)
+            cursor.execute(
+                "SELECT n_live_tup, last_vacuum, last_autovacuum, last_analyze, last_autoanalyze FROM pg_stat_user_tables WHERE schemaname = %s AND relname = %s",
+                (schema, table),
+            )
+            stat_row = cursor.fetchone()
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = %s AND table_name = %s",
+                (schema, table),
+            )
+            col_count = cursor.fetchone()[0]
+            updated = "Unknown"
+            n_live_tup = None
+            last_vacuum = None
+            last_autovacuum = None
+            last_analyze = None
+            last_autoanalyze = None
+
+            def _ts(val):
+                if not val:
+                    return None
+                return val.isoformat() if hasattr(val, "isoformat") else str(val)
+
+            if stat_row:
+                n_live_tup = stat_row[0]
+                last_vacuum = _ts(stat_row[1])
+                last_autovacuum = _ts(stat_row[2])
+                last_analyze = _ts(stat_row[3])
+                last_autoanalyze = _ts(stat_row[4])
+                for ts in (stat_row[1], stat_row[2], stat_row[3], stat_row[4]):
+                    if ts:
+                        updated = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+                        break
+
             return {
                 "schema": schema,
                 "table": table,
                 "row_count": row_count,
+                "columns": col_count,
+                "updated": updated,
                 "size": size_info[0] if size_info else "Unknown",
-                "size_bytes": size_info[1] if size_info else 0
+                "size_bytes": size_info[1] if size_info else 0,
+                "n_live_tup": n_live_tup,
+                "last_vacuum": last_vacuum,
+                "last_autovacuum": last_autovacuum,
+                "last_analyze": last_analyze,
+                "last_autoanalyze": last_autoanalyze,
             }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -227,13 +275,14 @@ async def get_sales_statistics():
                 "avg_sale": float(row[2] or 0),
                 "total_quantity": row[3] or 0
             }
-            
-            # Sales by date (last 30 days) - optimized
-            # Calculate date threshold
-            threshold_date = date.today() - timedelta(days=30)
-            threshold_key = int(threshold_date.strftime('%Y%m%d'))
-            
-            cursor.execute("""
+
+            # Sales by date (last ~2 months) - show data from 60 days ago to current date.
+            # `order_date_key` is an integer in YYYYMMDD format.
+            threshold_date = date.today() - timedelta(days=60)
+            threshold_key = int(threshold_date.strftime("%Y%m%d"))
+
+            cursor.execute(
+                """
                 SELECT 
                     TO_CHAR(TO_DATE(order_date_key::text, 'YYYYMMDD'), 'YYYY-MM-DD') as date,
                     COUNT(*) as sales_count,
@@ -242,8 +291,9 @@ async def get_sales_statistics():
                 WHERE order_date_key >= %s
                 GROUP BY order_date_key
                 ORDER BY order_date_key DESC
-                LIMIT 30
-            """, (threshold_key,))
+                """,
+                (threshold_key,),
+            )
             daily_sales = [
                 {"date": row[0], "count": row[1], "revenue": float(row[2] or 0)}
                 for row in cursor.fetchall()

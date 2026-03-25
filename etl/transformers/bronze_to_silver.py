@@ -10,6 +10,8 @@ import time
 
 logger = logging.getLogger(__name__)
 
+from etl.transformers.incremental_pending import fetch_pending_count
+
 # Silver table name -> Bronze table name (when they differ)
 BRONZE_TABLE_FOR_SILVER = {
     "employee": "employment",  # silver.employee is populated from bronze.employment
@@ -41,7 +43,12 @@ class BronzeToSilverTransformer:
         # Get countries from bronze that haven't been processed
         select_query = """
             SELECT b.country_id, b.country_name, b.country_code, b.nat_lang_code, b.currency_code
-            FROM bronze.country b
+            FROM (
+                SELECT DISTINCT ON (b2.country_id)
+                    b2.country_id, b2.country_name, b2.country_code, b2.nat_lang_code, b2.currency_code
+                FROM bronze.country b2
+                ORDER BY b2.country_id, b2._load_timestamp DESC NULLS LAST
+            ) b
             LEFT JOIN silver.country s ON b.country_id = s.country_id
             WHERE s.country_id IS NULL
             ORDER BY b.country_id
@@ -93,7 +100,14 @@ class BronzeToSilverTransformer:
             SELECT l.location_id, l.country_id, l.address_line_1, l.address_line_2,
                    l.city, l.state, l.district, l.postal_code, l.location_type_code,
                    l.description, l.shipping_notes
-            FROM bronze.location l
+            FROM (
+                SELECT DISTINCT ON (l2.location_id)
+                    l2.location_id, l2.country_id, l2.address_line_1, l2.address_line_2,
+                    l2.city, l2.state, l2.district, l2.postal_code, l2.location_type_code,
+                    l2.description, l2.shipping_notes
+                FROM bronze.location l2
+                ORDER BY l2.location_id, l2._load_timestamp DESC NULLS LAST
+            ) l
             LEFT JOIN silver.location s ON l.location_id = s.location_id
             WHERE s.location_id IS NULL
             ORDER BY l.location_id
@@ -160,7 +174,12 @@ class BronzeToSilverTransformer:
         
         select_query = """
             SELECT w.warehouse_id, w.location_id, w.warehouse_name
-            FROM bronze.warehouse w
+            FROM (
+                SELECT DISTINCT ON (w2.warehouse_id)
+                    w2.warehouse_id, w2.location_id, w2.warehouse_name
+                FROM bronze.warehouse w2
+                ORDER BY w2.warehouse_id, w2._load_timestamp DESC NULLS LAST
+            ) w
             LEFT JOIN silver.warehouse s ON w.warehouse_id = s.warehouse_id
             WHERE s.warehouse_id IS NULL
             ORDER BY w.warehouse_id
@@ -214,7 +233,14 @@ class BronzeToSilverTransformer:
             SELECT b.product_id, b.product_name, b.description, b.category, b.weight_class,
                    b.warranty_period, b.supplier_id, b.status, b.list_price, b.minimum_price,
                    b.price_currency, b.catalog_url
-            FROM bronze.product b
+            FROM (
+                SELECT DISTINCT ON (b2.product_id)
+                    b2.product_id, b2.product_name, b2.description, b2.category, b2.weight_class,
+                    b2.warranty_period, b2.supplier_id, b2.status, b2.list_price, b2.minimum_price,
+                    b2.price_currency, b2.catalog_url
+                FROM bronze.product b2
+                ORDER BY b2.product_id, b2._load_timestamp DESC NULLS LAST
+            ) b
             LEFT JOIN silver.product s ON b.product_id = s.product_id
             WHERE s.product_id IS NULL
             ORDER BY b.product_id
@@ -276,7 +302,12 @@ class BronzeToSilverTransformer:
         
         select_query = """
             SELECT i.inventory_id, i.product_id, i.warehouse_id, i.quantity_on_hand, i.quantity_available
-            FROM bronze.inventory i
+            FROM (
+                SELECT DISTINCT ON (i2.inventory_id)
+                    i2.inventory_id, i2.product_id, i2.warehouse_id, i2.quantity_on_hand, i2.quantity_available
+                FROM bronze.inventory i2
+                ORDER BY i2.inventory_id, i2._load_timestamp DESC NULLS LAST
+            ) i
             LEFT JOIN silver.inventory s ON i.inventory_id = s.inventory_id
             WHERE s.inventory_id IS NULL
             ORDER BY i.inventory_id
@@ -340,7 +371,13 @@ class BronzeToSilverTransformer:
         select_query = """
             SELECT b.person_id, b.first_name, b.last_name, b.middle_names, b.nickname,
                    b.nat_lang_code, b.culture_code, b.gender
-            FROM bronze.person b
+            FROM (
+                SELECT DISTINCT ON (b2.person_id)
+                    b2.person_id, b2.first_name, b2.last_name, b2.middle_names, b2.nickname,
+                    b2.nat_lang_code, b2.culture_code, b2.gender
+                FROM bronze.person b2
+                ORDER BY b2.person_id, b2._load_timestamp DESC NULLS LAST
+            ) b
             LEFT JOIN silver.person s ON b.person_id = s.person_id
             WHERE s.person_id IS NULL
             ORDER BY b.person_id
@@ -404,11 +441,16 @@ class BronzeToSilverTransformer:
         """Transform bronze.restricted_info to silver.restricted_info."""
         logger.info("Starting restricted info transformation...")
         
-        # Fix: Join with silver.person to get person_key, then check if it exists in silver.restricted_info
         select_query = """
             SELECT r.person_id, r.date_of_birth, r.date_of_death, r.government_id, r.passport_id,
                    r.hire_date, r.seniority_code, p.person_key
-            FROM bronze.restricted_info r
+            FROM (
+                SELECT DISTINCT ON (r2.person_id)
+                    r2.person_id, r2.date_of_birth, r2.date_of_death, r2.government_id, r2.passport_id,
+                    r2.hire_date, r2.seniority_code
+                FROM bronze.restricted_info r2
+                ORDER BY r2.person_id, r2._load_timestamp DESC NULLS LAST
+            ) r
             INNER JOIN silver.person p ON r.person_id = p.person_id
             LEFT JOIN silver.restricted_info s ON p.person_key = s.person_key
             WHERE s.person_key IS NULL
@@ -503,12 +545,18 @@ class BronzeToSilverTransformer:
         # Now select bronze records that don't exist in silver
         # Join through person and location tables to get the correct keys for comparison
         select_query = """
-            SELECT DISTINCT pl.persons_person_id, pl.locations_location_id, pl.sub_address,
+            SELECT pl.persons_person_id, pl.locations_location_id, pl.sub_address,
                    pl.location_usage, pl.notes
-            FROM bronze.person_location pl
+            FROM (
+                SELECT DISTINCT ON (pl2.persons_person_id, pl2.locations_location_id)
+                    pl2.persons_person_id, pl2.locations_location_id, pl2.sub_address,
+                    pl2.location_usage, pl2.notes
+                FROM bronze.person_location pl2
+                ORDER BY pl2.persons_person_id, pl2.locations_location_id, pl2._load_timestamp DESC NULLS LAST
+            ) pl
             INNER JOIN silver.person p ON pl.persons_person_id = p.person_id
             INNER JOIN silver.location l ON pl.locations_location_id = l.location_id
-            LEFT JOIN silver.person_location s ON p.person_key = s.person_key 
+            LEFT JOIN silver.person_location s ON p.person_key = s.person_key
                 AND l.location_key = s.location_key
             WHERE s.person_location_key IS NULL
             ORDER BY pl.persons_person_id, pl.locations_location_id
@@ -599,7 +647,13 @@ class BronzeToSilverTransformer:
         select_query = """
             SELECT pn.phone_number_id, pn.persons_person_id, pn.locations_location_id,
                    pn.phone_number, pn.country_code, pn.phone_type_id
-            FROM bronze.phone_number pn
+            FROM (
+                SELECT DISTINCT ON (pn2.phone_number_id)
+                    pn2.phone_number_id, pn2.persons_person_id, pn2.locations_location_id,
+                    pn2.phone_number, pn2.country_code, pn2.phone_type_id
+                FROM bronze.phone_number pn2
+                ORDER BY pn2.phone_number_id, pn2._load_timestamp DESC NULLS LAST
+            ) pn
             LEFT JOIN silver.phone_number s ON pn.phone_number_id = s.phone_id
             WHERE s.phone_id IS NULL
             ORDER BY pn.phone_number_id
@@ -672,7 +726,12 @@ class BronzeToSilverTransformer:
         
         select_query = """
             SELECT b.company_id, b.company_name, b.company_credit_limit, b.credit_limit_currency
-            FROM bronze.customer_company b
+            FROM (
+                SELECT DISTINCT ON (b2.company_id)
+                    b2.company_id, b2.company_name, b2.company_credit_limit, b2.credit_limit_currency
+                FROM bronze.customer_company b2
+                ORDER BY b2.company_id, b2._load_timestamp DESC NULLS LAST
+            ) b
             LEFT JOIN silver.customer_company s ON b.company_id = s.company_id
             WHERE s.company_id IS NULL
             ORDER BY b.company_id
@@ -733,7 +792,13 @@ class BronzeToSilverTransformer:
         select_query = """
             SELECT ce.customer_employee_id, ce.company_id, ce.badge_number, ce.job_title,
                    ce.department, ce.credit_limit, ce.credit_limit_currency
-            FROM bronze.customer_employee ce
+            FROM (
+                SELECT DISTINCT ON (ce2.customer_employee_id)
+                    ce2.customer_employee_id, ce2.company_id, ce2.badge_number, ce2.job_title,
+                    ce2.department, ce2.credit_limit, ce2.credit_limit_currency
+                FROM bronze.customer_employee ce2
+                ORDER BY ce2.customer_employee_id, ce2._load_timestamp DESC NULLS LAST
+            ) ce
             LEFT JOIN silver.customer_employee s ON ce.customer_employee_id = s.customer_employee_id
             WHERE s.customer_employee_id IS NULL
             ORDER BY ce.customer_employee_id
@@ -788,13 +853,11 @@ class BronzeToSilverTransformer:
         """Transform bronze.employment_jobs to silver.employment_jobs."""
         logger.info("Starting employment jobs transformation...")
         
-        # Ensure clean transaction state
         try:
             self.connection.rollback()
-        except:
+        except Exception:
             pass
         
-        # Check if table is empty first - use a simple query
         try:
             self.cursor.execute("SELECT COUNT(*) FROM silver.employment_jobs")
             silver_count = self.cursor.fetchone()[0]
@@ -802,47 +865,59 @@ class BronzeToSilverTransformer:
             logger.warning(f"Could not check silver.employment_jobs count: {e}")
             silver_count = 0
         
-        logger.info(f"  silver.employment_jobs current count: {silver_count if silver_count is not None else 'unknown'}")
+        logger.info(
+            "  silver.employment_jobs current count: %s",
+            f"{silver_count:,}" if silver_count is not None else "unknown",
+        )
         
-        if silver_count is None or silver_count == 0:
-            # Table is empty, select all from bronze (no JOIN needed)
-            logger.info("  Table is empty - selecting all records from bronze.employment_jobs")
-            select_query = """
-                SELECT ej.hr_job_id, ej.countries_country_id, ej.job_title, ej.min_salary, ej.max_salary
-                FROM bronze.employment_jobs ej
-                ORDER BY ej.hr_job_id
-                LIMIT %s
-            """
-        else:
-            # Table has data, only process new records
-            logger.info(f"  Table has {silver_count:,} records - selecting only new records")
-            select_query = """
-                SELECT ej.hr_job_id, ej.countries_country_id, ej.job_title, ej.min_salary, ej.max_salary
-                FROM bronze.employment_jobs ej
-                LEFT JOIN silver.employment_jobs s ON ej.hr_job_id = s.hr_job_id
-                WHERE s.hr_job_id IS NULL
-                ORDER BY ej.hr_job_id
-                LIMIT %s
-            """
+        select_query = """
+            SELECT ej.hr_job_id, ej.countries_country_id, ej.job_title, ej.min_salary, ej.max_salary
+            FROM (
+                SELECT DISTINCT ON (j.hr_job_id)
+                    j.hr_job_id, j.countries_country_id, j.job_title, j.min_salary, j.max_salary
+                FROM bronze.employment_jobs j
+                ORDER BY j.hr_job_id, j._load_timestamp DESC NULLS LAST
+            ) ej
+            LEFT JOIN silver.employment_jobs s ON ej.hr_job_id = s.hr_job_id
+            WHERE s.hr_job_id IS NULL
+            ORDER BY ej.hr_job_id
+            LIMIT %s
+        """
         
         try:
             self.cursor.execute(select_query, (batch_size,))
             bronze_jobs = self.cursor.fetchall()
         except Exception as e:
             logger.error(f"  [ERROR] Failed to execute SELECT query: {e}")
-            logger.error(f"  [ERROR] Query: {select_query[:200]}...")
             self.connection.rollback()
             raise
         
         logger.info(f"  Selected {len(bronze_jobs)} records from bronze for processing")
         
         if not bronze_jobs:
-            # Double-check: verify bronze actually has data
-            self.cursor.execute("SELECT COUNT(*) FROM bronze.employment_jobs")
-            bronze_total = self.cursor.fetchone()[0]
-            if bronze_total > 0:
-                logger.error(f"  [ERROR] bronze.employment_jobs has {bronze_total:,} records but SELECT returned 0!")
-                logger.error(f"  [ERROR] This indicates a query issue - check SELECT query logic")
+            pending = fetch_pending_count(self.cursor, "employment_jobs")
+            if pending is None or pending == 0:
+                self.cursor.execute("SELECT COUNT(*) FROM bronze.employment_jobs")
+                bronze_total = self.cursor.fetchone()[0]
+                self.cursor.execute(
+                    "SELECT COUNT(DISTINCT hr_job_id) FROM bronze.employment_jobs WHERE hr_job_id IS NOT NULL"
+                )
+                bronze_distinct = self.cursor.fetchone()[0]
+                if bronze_total > 0:
+                    logger.info(
+                        "  No new hr_job_id to load (%s bronze rows, %s distinct hr_job_id; all in silver).",
+                        f"{bronze_total:,}",
+                        f"{bronze_distinct:,}",
+                    )
+                    if bronze_total != bronze_distinct:
+                        logger.info(
+                            "  bronze.employment_jobs row count > distinct hr_job_id (duplicate rows in bronze)."
+                        )
+            elif pending > 0:
+                logger.error(
+                    "  [ERROR] %s employment_jobs pending by key but SELECT returned 0.",
+                    f"{pending:,}",
+                )
             logger.info("No new employment jobs to transform")
             return 0
         
@@ -931,7 +1006,7 @@ class BronzeToSilverTransformer:
                         logger.error(f"  [ERROR] Records don't exist but weren't inserted - check constraints/errors")
                 
                 logger.info(f"Successfully transformed {actual_inserted} employment jobs")
-                return actual_inserted if actual_inserted > 0 else len(transformed)
+                return max(0, actual_inserted)
             except Exception as e:
                 self.connection.rollback()
                 logger.error(f"[ERROR] Failed to insert employment jobs: {e}")
@@ -969,39 +1044,30 @@ class BronzeToSilverTransformer:
         logger.info(f"  silver.employee current count: {silver_count if silver_count is not None else 'unknown'}")
         
         if silver_count is None or silver_count == 0:
-            # Table is empty, select all from bronze that have valid person_id
-            logger.info("  Table is empty - selecting all records from bronze.employment with valid person_id")
-            # First check how many records would match
-            self.cursor.execute("""
-                SELECT COUNT(*) 
-                FROM bronze.employment e
-                WHERE e.person_id IS NOT NULL
-                AND e.person_id IN (SELECT person_id FROM silver.person)
-            """)
-            matching_count = self.cursor.fetchone()[0]
-            logger.info(f"  Found {matching_count:,} employees with valid person_id in silver.person")
-            
-            select_query = """
-                SELECT e.employee_id, e.person_id, e.hr_job_id, e.manager_employee_id,
-                       e.start_date, e.end_date, e.salary, e.commission_percent, e.employment_status
-                FROM bronze.employment e
-                WHERE e.person_id IS NOT NULL
-                AND e.person_id IN (SELECT person_id FROM silver.person)
-                ORDER BY e.employee_id
-                LIMIT %s
-            """
+            logger.info(
+                "  Loading deduped bronze.employment (latest row per employee_id by _load_timestamp) "
+                "with valid person_id in silver.person"
+            )
         else:
-            # Table has data, only process new records
-            logger.info(f"  Table has {silver_count:,} records - selecting only new records")
-            select_query = """
-                SELECT e.employee_id, e.person_id, e.hr_job_id, e.manager_employee_id,
-                       e.start_date, e.end_date, e.salary, e.commission_percent, e.employment_status
-                FROM bronze.employment e
-                LEFT JOIN silver.employee s ON e.employee_id = s.employee_id
-                WHERE s.employee_id IS NULL
-                ORDER BY e.employee_id
-                LIMIT %s
-            """
+            logger.info(f"  Incremental load: new employee_id only (bronze deduped per business key)")
+        
+        select_query = """
+            SELECT e.employee_id, e.person_id, e.hr_job_id, e.manager_employee_id,
+                   e.start_date, e.end_date, e.salary, e.commission_percent, e.employment_status
+            FROM (
+                SELECT DISTINCT ON (e2.employee_id)
+                    e2.employee_id, e2.person_id, e2.hr_job_id, e2.manager_employee_id,
+                    e2.start_date, e2.end_date, e2.salary, e2.commission_percent, e2.employment_status
+                FROM bronze.employment e2
+                WHERE e2.person_id IS NOT NULL
+                  AND e2.person_id IN (SELECT person_id FROM silver.person)
+                ORDER BY e2.employee_id, e2._load_timestamp DESC NULLS LAST
+            ) e
+            LEFT JOIN silver.employee s ON e.employee_id = s.employee_id
+            WHERE s.employee_id IS NULL
+            ORDER BY e.employee_id
+            LIMIT %s
+        """
         
         try:
             self.cursor.execute(select_query, (batch_size,))
@@ -1014,12 +1080,32 @@ class BronzeToSilverTransformer:
         logger.info(f"  Selected {len(bronze_employees)} records from bronze for processing")
         
         if not bronze_employees:
-            # Double-check: verify bronze actually has data
-            self.cursor.execute("SELECT COUNT(*) FROM bronze.employment")
-            bronze_total = self.cursor.fetchone()[0]
-            if bronze_total > 0:
-                logger.error(f"  [ERROR] bronze.employment has {bronze_total:,} records but SELECT returned 0!")
-                logger.error(f"  [ERROR] This indicates a query issue - check SELECT query logic")
+            pending = fetch_pending_count(self.cursor, "employees")
+            if pending is None or pending == 0:
+                self.cursor.execute("SELECT COUNT(*) FROM bronze.employment")
+                bronze_total = self.cursor.fetchone()[0]
+                self.cursor.execute(
+                    "SELECT COUNT(DISTINCT employee_id) FROM bronze.employment "
+                    "WHERE employee_id IS NOT NULL"
+                )
+                bronze_distinct_ids = self.cursor.fetchone()[0]
+                if bronze_total > 0:
+                    logger.info(
+                        "  No new employee_ids to load (%s bronze rows, %s distinct employee_id; "
+                        "all ids already in silver.employee).",
+                        f"{bronze_total:,}",
+                        f"{bronze_distinct_ids:,}",
+                    )
+                    if bronze_total != bronze_distinct_ids:
+                        logger.info(
+                            "  bronze.employment row count > distinct employee_id "
+                            "(duplicate employment rows in bronze)."
+                        )
+            elif pending > 0:
+                logger.error(
+                    "  [ERROR] %s employees pending by key but SELECT returned 0.",
+                    f"{pending:,}",
+                )
             logger.info("No new employees to transform")
             return 0
         
@@ -1158,7 +1244,7 @@ class BronzeToSilverTransformer:
                     logger.error(f"  [ERROR] Check constraints, foreign keys, or if records already exist")
                 
                 logger.info(f"Successfully transformed {actual_inserted} employees")
-                return actual_inserted if actual_inserted > 0 else len(transformed)
+                return max(0, actual_inserted)
             except Exception as e:
                 self.connection.rollback()
                 logger.error(f"[ERROR] Failed to insert employees: {e}")
@@ -1198,37 +1284,27 @@ class BronzeToSilverTransformer:
         logger.info(f"  silver.customer current count: {silver_count if silver_count is not None else 'unknown'}")
         
         if silver_count is None or silver_count == 0:
-            # Table is empty, select all from bronze that have valid person_id
-            logger.info("  Table is empty - selecting all records from bronze.customer with valid person_id")
-            # First check how many records would match
-            self.cursor.execute("""
-                SELECT COUNT(*) 
-                FROM bronze.customer c
-                WHERE c.person_id IS NOT NULL
-                AND c.person_id IN (SELECT person_id FROM silver.person)
-            """)
-            matching_count = self.cursor.fetchone()[0]
-            logger.info(f"  Found {matching_count:,} customers with valid person_id in silver.person")
-            
-            select_query = """
-                SELECT c.customer_id, c.person_id, c.customer_employee_id, c.accountmgr_id, c.income_level
-                FROM bronze.customer c
-                WHERE c.person_id IS NOT NULL
-                AND c.person_id IN (SELECT person_id FROM silver.person)
-                ORDER BY c.customer_id
-                LIMIT %s
-            """
+            logger.info(
+                "  Loading deduped bronze.customer (latest per customer_id) with valid person_id"
+            )
         else:
-            # Table has data, only process new records
-            logger.info(f"  Table has {silver_count:,} records - selecting only new records")
-            select_query = """
-                SELECT c.customer_id, c.person_id, c.customer_employee_id, c.accountmgr_id, c.income_level
-                FROM bronze.customer c
-                LEFT JOIN silver.customer s ON c.customer_id = s.customer_id
-                WHERE s.customer_id IS NULL
-                ORDER BY c.customer_id
-                LIMIT %s
-            """
+            logger.info(f"  Incremental: new customer_id only (bronze deduped)")
+        
+        select_query = """
+            SELECT c.customer_id, c.person_id, c.customer_employee_id, c.accountmgr_id, c.income_level
+            FROM (
+                SELECT DISTINCT ON (c2.customer_id)
+                    c2.customer_id, c2.person_id, c2.customer_employee_id, c2.accountmgr_id, c2.income_level
+                FROM bronze.customer c2
+                WHERE c2.person_id IS NOT NULL
+                  AND c2.person_id IN (SELECT person_id FROM silver.person)
+                ORDER BY c2.customer_id, c2._load_timestamp DESC NULLS LAST
+            ) c
+            LEFT JOIN silver.customer s ON c.customer_id = s.customer_id
+            WHERE s.customer_id IS NULL
+            ORDER BY c.customer_id
+            LIMIT %s
+        """
         
         try:
             self.cursor.execute(select_query, (batch_size,))
@@ -1241,12 +1317,29 @@ class BronzeToSilverTransformer:
         logger.info(f"  Selected {len(bronze_customers)} records from bronze for processing")
         
         if not bronze_customers:
-            # Double-check: verify bronze actually has data
-            self.cursor.execute("SELECT COUNT(*) FROM bronze.customer")
-            bronze_total = self.cursor.fetchone()[0]
-            if bronze_total > 0:
-                logger.error(f"  [ERROR] bronze.customer has {bronze_total:,} records but SELECT returned 0!")
-                logger.error(f"  [ERROR] This indicates a query issue - check SELECT query logic")
+            pending = fetch_pending_count(self.cursor, "customers")
+            if pending is None or pending == 0:
+                self.cursor.execute("SELECT COUNT(*) FROM bronze.customer")
+                bronze_total = self.cursor.fetchone()[0]
+                distinct = 0
+                try:
+                    self.cursor.execute(
+                        "SELECT COUNT(DISTINCT customer_id) FROM bronze.customer WHERE customer_id IS NOT NULL"
+                    )
+                    distinct = self.cursor.fetchone()[0]
+                except Exception:
+                    pass
+                if bronze_total > 0:
+                    logger.info(
+                        "  No new customer_id to load (%s bronze rows, %s distinct; all in silver).",
+                        f"{bronze_total:,}",
+                        f"{distinct:,}",
+                    )
+            elif pending > 0:
+                logger.error(
+                    "  [ERROR] %s customers pending by key but SELECT returned 0.",
+                    f"{pending:,}",
+                )
             logger.info("No new customers to transform")
             return 0
         
@@ -1355,7 +1448,7 @@ class BronzeToSilverTransformer:
                     logger.error(f"  [ERROR] Check constraints, foreign keys, or if records already exist")
                 
                 logger.info(f"Successfully transformed {actual_inserted} customers")
-                return actual_inserted if actual_inserted > 0 else len(transformed)
+                return max(0, actual_inserted)
             except Exception as e:
                 self.connection.rollback()
                 logger.error(f"[ERROR] Failed to insert customers: {e}")
@@ -1394,45 +1487,42 @@ class BronzeToSilverTransformer:
         
         logger.info(f"  silver.orders current count: {silver_count if silver_count is not None else 'unknown'}")
         
-        if silver_count is None or silver_count == 0:
-            # Table is empty, select all from bronze that have valid customer_id
-            logger.info("  Table is empty - selecting all records from bronze.orders with valid customer_id")
-            # First check how many records would match
-            self.cursor.execute("""
-                SELECT COUNT(*) 
-                FROM bronze.orders o
-                WHERE o.customer_id IS NOT NULL
-                AND o.customer_id IN (SELECT customer_id FROM silver.customer)
-            """)
-            matching_count = self.cursor.fetchone()[0]
-            logger.info(f"  Found {matching_count:,} orders with valid customer_id in silver.customer")
-            
-            if matching_count == 0:
-                logger.error("  [ERROR] No orders have valid customer_id in silver.customer!")
-                logger.error("  [ERROR] silver.customer must be populated first")
+        self.cursor.execute("""
+            SELECT COUNT(*) FROM bronze.orders o
+            WHERE o.customer_id IS NOT NULL
+              AND o.customer_id IN (SELECT customer_id FROM silver.customer)
+        """)
+        orders_matchable = self.cursor.fetchone()[0]
+        if orders_matchable == 0:
+            self.cursor.execute("SELECT COUNT(*) FROM bronze.orders")
+            if self.cursor.fetchone()[0] > 0:
+                logger.error(
+                    "  [ERROR] bronze.orders has rows but none reference silver.customer — populate customer first."
+                )
                 return 0
-            
-            select_query = """
-                SELECT o.order_id, o.customer_id, o.sales_rep_id, o.order_date, o.order_code,
-                       o.order_status, o.order_total, o.order_currency, o.promotion_code
-                FROM bronze.orders o
-                WHERE o.customer_id IS NOT NULL
-                AND o.customer_id IN (SELECT customer_id FROM silver.customer)
-                ORDER BY o.order_id
-                LIMIT %s
-            """
+        
+        if silver_count is None or silver_count == 0:
+            logger.info("  Loading deduped bronze.orders (latest per order_id) with valid customer_id")
         else:
-            # Table has data, only process new records
-            logger.info(f"  Table has {silver_count:,} records - selecting only new records")
-            select_query = """
-                SELECT o.order_id, o.customer_id, o.sales_rep_id, o.order_date, o.order_code,
-                       o.order_status, o.order_total, o.order_currency, o.promotion_code
-                FROM bronze.orders o
-                LEFT JOIN silver.orders s ON o.order_id = s.order_id
-                WHERE s.order_id IS NULL
-                ORDER BY o.order_id
-                LIMIT %s
-            """
+            logger.info(f"  Incremental: new order_id only")
+        
+        select_query = """
+            SELECT o.order_id, o.customer_id, o.sales_rep_id, o.order_date, o.order_code,
+                   o.order_status, o.order_total, o.order_currency, o.promotion_code
+            FROM (
+                SELECT DISTINCT ON (o2.order_id)
+                    o2.order_id, o2.customer_id, o2.sales_rep_id, o2.order_date, o2.order_code,
+                    o2.order_status, o2.order_total, o2.order_currency, o2.promotion_code
+                FROM bronze.orders o2
+                WHERE o2.customer_id IS NOT NULL
+                  AND o2.customer_id IN (SELECT customer_id FROM silver.customer)
+                ORDER BY o2.order_id, o2._load_timestamp DESC NULLS LAST
+            ) o
+            LEFT JOIN silver.orders s ON o.order_id = s.order_id
+            WHERE s.order_id IS NULL
+            ORDER BY o.order_id
+            LIMIT %s
+        """
         
         try:
             self.cursor.execute(select_query, (batch_size,))
@@ -1445,12 +1535,28 @@ class BronzeToSilverTransformer:
         logger.info(f"  Selected {len(bronze_orders)} records from bronze for processing")
         
         if not bronze_orders:
-            # Double-check: verify bronze actually has data
-            self.cursor.execute("SELECT COUNT(*) FROM bronze.orders")
-            bronze_total = self.cursor.fetchone()[0]
-            if bronze_total > 0:
-                logger.error(f"  [ERROR] bronze.orders has {bronze_total:,} records but SELECT returned 0!")
-                logger.error(f"  [ERROR] This indicates a query issue - check SELECT query logic")
+            pending = fetch_pending_count(self.cursor, "orders")
+            if pending is None or pending == 0:
+                self.cursor.execute("SELECT COUNT(*) FROM bronze.orders")
+                bronze_total = self.cursor.fetchone()[0]
+                try:
+                    self.cursor.execute(
+                        "SELECT COUNT(DISTINCT order_id) FROM bronze.orders WHERE order_id IS NOT NULL"
+                    )
+                    distinct = self.cursor.fetchone()[0]
+                except Exception:
+                    distinct = 0
+                if bronze_total > 0:
+                    logger.info(
+                        "  No new order_id to load (%s bronze rows, %s distinct order_id; all in silver or missing customer).",
+                        f"{bronze_total:,}",
+                        f"{distinct:,}",
+                    )
+            elif pending > 0:
+                logger.error(
+                    "  [ERROR] %s orders pending by key but SELECT returned 0.",
+                    f"{pending:,}",
+                )
             logger.info("No new orders to transform")
             return 0
         
@@ -1552,7 +1658,7 @@ class BronzeToSilverTransformer:
                     logger.error(f"  [ERROR] Check constraints, foreign keys, or if records already exist")
                 
                 logger.info(f"Successfully transformed {actual_inserted} orders")
-                return actual_inserted if actual_inserted > 0 else len(transformed)
+                return max(0, actual_inserted)
             except Exception as e:
                 self.connection.rollback()
                 logger.error(f"[ERROR] Failed to insert orders: {e}")
@@ -1591,53 +1697,45 @@ class BronzeToSilverTransformer:
         
         logger.info(f"  silver.order_item current count: {silver_count if silver_count is not None else 'unknown'}")
         
-        if silver_count is None or silver_count == 0:
-            # Table is empty, select all from bronze that have valid order_id and product_id
-            logger.info("  Table is empty - selecting all records from bronze.order_item with valid order_id and product_id")
-            # First check how many records would match
-            self.cursor.execute("""
-                SELECT COUNT(*) 
-                FROM bronze.order_item oi
-                WHERE oi.order_id IS NOT NULL 
-                AND oi.product_id IS NOT NULL
-                AND oi.order_id IN (SELECT order_id FROM silver.orders)
-                AND oi.product_id IN (SELECT product_id FROM silver.product)
-            """)
-            matching_count = self.cursor.fetchone()[0]
-            logger.info(f"  Found {matching_count:,} order items with valid order_id and product_id")
-            
-            if matching_count == 0:
-                logger.error("  [ERROR] No order items have valid order_id in silver.orders or product_id in silver.product!")
-                logger.error("  [ERROR] silver.orders and silver.product must be populated first")
+        self.cursor.execute("""
+            SELECT COUNT(*) FROM bronze.order_item oi
+            WHERE oi.order_id IS NOT NULL AND oi.product_id IS NOT NULL
+              AND oi.order_id IN (SELECT order_id FROM silver.orders)
+              AND oi.product_id IN (SELECT product_id FROM silver.product)
+        """)
+        items_matchable = self.cursor.fetchone()[0]
+        if items_matchable == 0:
+            self.cursor.execute("SELECT COUNT(*) FROM bronze.order_item")
+            if self.cursor.fetchone()[0] > 0:
+                logger.error(
+                    "  [ERROR] bronze.order_item has rows but none join silver.orders + silver.product — run those steps first."
+                )
                 return 0
-            
-            select_query = """
-                SELECT oi.order_item_id, oi.order_id, oi.product_id, oi.unit_price, oi.quantity,
-                       o.promotion_code, p.list_price
-                FROM bronze.order_item oi
-                INNER JOIN bronze.orders o ON oi.order_id = o.order_id
-                LEFT JOIN bronze.product p ON oi.product_id = p.product_id
-                WHERE oi.order_id IS NOT NULL 
-                AND oi.product_id IS NOT NULL
-                AND oi.order_id IN (SELECT order_id FROM silver.orders)
-                AND oi.product_id IN (SELECT product_id FROM silver.product)
-                ORDER BY oi.order_item_id
-                LIMIT %s
-            """
+        
+        if silver_count is None or silver_count == 0:
+            logger.info("  Loading deduped bronze.order_item (latest per order_item_id) with valid FKs")
         else:
-            # Table has data, only process new records
-            logger.info(f"  Table has {silver_count:,} records - selecting only new records")
-            select_query = """
-                SELECT oi.order_item_id, oi.order_id, oi.product_id, oi.unit_price, oi.quantity,
-                       o.promotion_code, p.list_price
-                FROM bronze.order_item oi
-                INNER JOIN bronze.orders o ON oi.order_id = o.order_id
-                LEFT JOIN bronze.product p ON oi.product_id = p.product_id
-                LEFT JOIN silver.order_item s ON oi.order_item_id = s.order_item_id
-                WHERE s.order_item_id IS NULL
-                ORDER BY oi.order_item_id
-                LIMIT %s
-            """
+            logger.info(f"  Incremental: new order_item_id only")
+        
+        select_query = """
+            SELECT oi.order_item_id, oi.order_id, oi.product_id, oi.unit_price, oi.quantity,
+                   o.promotion_code, p.list_price
+            FROM (
+                SELECT DISTINCT ON (oi2.order_item_id)
+                    oi2.order_item_id, oi2.order_id, oi2.product_id, oi2.unit_price, oi2.quantity
+                FROM bronze.order_item oi2
+                WHERE oi2.order_id IS NOT NULL AND oi2.product_id IS NOT NULL
+                  AND oi2.order_id IN (SELECT order_id FROM silver.orders)
+                  AND oi2.product_id IN (SELECT product_id FROM silver.product)
+                ORDER BY oi2.order_item_id, oi2._load_timestamp DESC NULLS LAST
+            ) oi
+            INNER JOIN bronze.orders o ON oi.order_id = o.order_id
+            LEFT JOIN bronze.product p ON oi.product_id = p.product_id
+            LEFT JOIN silver.order_item s ON oi.order_item_id = s.order_item_id
+            WHERE s.order_item_id IS NULL
+            ORDER BY oi.order_item_id
+            LIMIT %s
+        """
         
         try:
             self.cursor.execute(select_query, (batch_size,))
@@ -1650,12 +1748,29 @@ class BronzeToSilverTransformer:
         logger.info(f"  Selected {len(bronze_items)} records from bronze for processing")
         
         if not bronze_items:
-            # Double-check: verify bronze actually has data
-            self.cursor.execute("SELECT COUNT(*) FROM bronze.order_item")
-            bronze_total = self.cursor.fetchone()[0]
-            if bronze_total > 0:
-                logger.error(f"  [ERROR] bronze.order_item has {bronze_total:,} records but SELECT returned 0!")
-                logger.error(f"  [ERROR] This indicates a query issue - check SELECT query logic")
+            pending = fetch_pending_count(self.cursor, "order_items")
+            if pending is None or pending == 0:
+                self.cursor.execute("SELECT COUNT(*) FROM bronze.order_item")
+                bronze_total = self.cursor.fetchone()[0]
+                try:
+                    self.cursor.execute(
+                        "SELECT COUNT(DISTINCT order_item_id) FROM bronze.order_item "
+                        "WHERE order_item_id IS NOT NULL"
+                    )
+                    distinct = self.cursor.fetchone()[0]
+                except Exception:
+                    distinct = 0
+                if bronze_total > 0:
+                    logger.info(
+                        "  No new order_item_id to load (%s bronze rows, %s distinct; synced or FK mismatch).",
+                        f"{bronze_total:,}",
+                        f"{distinct:,}",
+                    )
+            elif pending > 0:
+                logger.error(
+                    "  [ERROR] %s order_items pending by key but SELECT returned 0.",
+                    f"{pending:,}",
+                )
             logger.info("No new order items to transform")
             return 0
         
@@ -1772,7 +1887,7 @@ class BronzeToSilverTransformer:
                     logger.error(f"  [ERROR] Check constraints, foreign keys, or if records already exist")
                 
                 logger.info(f"Successfully transformed {actual_inserted} order items")
-                return actual_inserted if actual_inserted > 0 else len(transformed)
+                return max(0, actual_inserted)
             except Exception as e:
                 self.connection.rollback()
                 logger.error(f"[ERROR] Failed to insert order items: {e}")
@@ -1838,33 +1953,40 @@ class BronzeToSilverTransformer:
                 logger.warning("Counts failed for %s / %s: %s", bronze_table, table_name, e)
                 bronze_count = 0
                 silver_before = 0
-            records_to_process = bronze_count - silver_before
-            logger.info("Step %s/%s: %s (bronze=%s, silver=%s)", step_num, total_steps, name, bronze_count, silver_before)
-            if bronze_count > 0 and silver_before == 0:
-                records_to_process = bronze_count
-            elif records_to_process <= 0:
+            pending_n = fetch_pending_count(self.cursor, name)
+            if pending_n is not None:
+                records_to_process = pending_n
+            else:
+                records_to_process = max(0, bronze_count - silver_before)
+                if bronze_count > 0 and silver_before == 0:
+                    records_to_process = bronze_count
+            
+            logger.info(
+                "Step %s/%s: %s (bronze=%s, silver=%s, pending=%s)",
+                step_num,
+                total_steps,
+                name,
+                f"{bronze_count:,}",
+                f"{silver_before:,}",
+                f"{records_to_process:,}",
+            )
+            
+            if records_to_process <= 0:
+                totals[name] = 0
+                logger.info("  Skipping — no pending rows for silver.%s", table_name)
                 continue
             
-            # Start job tracking
+            # Job tracking: only "Complete ETL Pipeline" is tracked at run_etl.py level.
+            # Do not create per-table jobs in monitoring.etl_jobs (only two jobs allowed).
             job_id = None
-            if self.tracker:
-                job_name = f"SILVER - {name.replace('_', ' ').title()} Transformation"
-                job_id = self.tracker.start_job(
-                    job_name,
-                    "transformation",
-                    "silver",
-                    table_name,
-                    bronze_count - silver_before
-                )
-                self.tracker.update_progress(job_id, 0)
-            
+
             # Transform in batches
             batch_num = 0
             step_total = 0
             consecutive_zero_batches = 0
             max_consecutive_zeros = 3  # Stop after 3 consecutive zero batches
             
-            is_empty_table = (silver_before == 0 and bronze_count > 0)
+            is_empty_table = (silver_before == 0 and records_to_process > 0)
             if is_empty_table:
                 effective_batch_size = min(batch_size * 10, 50000)
             else:
@@ -1894,11 +2016,6 @@ class BronzeToSilverTransformer:
                     batch_num += 1
                     step_total += count
                     
-                    # Update progress
-                    if self.tracker and job_id and records_to_process > 0:
-                        progress = min(95, int((step_total / records_to_process) * 100))
-                        self.tracker.update_progress(job_id, progress, step_total)
-                    
                     logger.info("Batch %s: %s records in %.1fs", batch_num, count, batch_elapsed)
                 
                 if records_to_process > 0 and step_total >= records_to_process:
@@ -1926,11 +2043,6 @@ class BronzeToSilverTransformer:
             
             step_elapsed = time.time() - step_start
             totals[name] = step_total
-            
-            # Complete job tracking
-            if self.tracker and job_id:
-                self.tracker.update_progress(job_id, 100, step_total)
-                self.tracker.complete_job(job_id, step_total)
             
             logger.info("")
             logger.info(f"[OK] {name.replace('_', ' ').title()} Transformation Complete")

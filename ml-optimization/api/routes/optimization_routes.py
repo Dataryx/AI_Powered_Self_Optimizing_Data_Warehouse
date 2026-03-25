@@ -34,6 +34,127 @@ class ApplyOptimizationRequest(BaseModel):
     auto: bool = False
 
 
+def _get_table_columns(cursor, schema: str, table: str, limit: int = 5) -> list:
+    """Get real column names for a table, preferring id/date/key-like columns first."""
+    cursor.execute("""
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+        ORDER BY ordinal_position
+        LIMIT %s
+    """, (schema, table, limit * 2))
+    raw = [r.get("column_name", "") for r in cursor.fetchall() if r.get("column_name")]
+    # Prefer columns that look like keys/dates for indexing
+    key_like = [c for c in raw if c in ("id", "pk", "key", "created_at", "updated_at", "date", "order_id", "customer_id", "product_id")]
+    other = [c for c in raw if c not in key_like]
+    return (key_like + other)[:limit] if (key_like or other) else raw[:limit]
+
+
+def _get_fallback_index_recommendations(conn, type_filter: Optional[str]) -> dict:
+    """Derive index recommendations from pg_stat_user_tables and real schema when index_recommendations table is missing."""
+    if type_filter and type_filter != "index":
+        return {"recommendations": [], "total": 0}
+    result = []
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                schemaname,
+                relname AS tablename,
+                COALESCE(seq_scan, 0) AS seq_scan,
+                COALESCE(idx_scan, 0) AS idx_scan,
+                COALESCE(n_live_tup, 0) AS n_live_tup
+            FROM pg_stat_user_tables
+            WHERE schemaname IN ('bronze', 'silver', 'gold')
+            ORDER BY COALESCE(seq_scan, 0) DESC, COALESCE(n_live_tup, 0) DESC
+            LIMIT 20
+        """)
+        rows = cursor.fetchall()
+        for i, row in enumerate(rows):
+            schema = row.get("schemaname", "")
+            table = row.get("tablename", "")
+            seq_scan = int(row.get("seq_scan", 0) or 0)
+            idx_scan = int(row.get("idx_scan", 0) or 0)
+            n_live = int(row.get("n_live_tup", 0) or 0)
+            full_name = f"{schema}.{table}" if schema else table
+            priority = "high" if seq_scan > 100 else "medium" if seq_scan > 10 else "low"
+            reason = f"Sequential scans: {seq_scan}, index scans: {idx_scan}"
+            if n_live > 0:
+                reason += f", ~{n_live:,} rows"
+            reason += ". Consider index on filter/sort columns."
+            columns = _get_table_columns(cursor, schema, table, 5)
+            col_list = ", ".join(columns) if columns else "id"
+            sql_stmt = f"CREATE INDEX idx_{table}_recommended ON {full_name} ({col_list});"
+            result.append({
+                "recommendation_id": f"fallback-index-{schema}-{table}-{i}",
+                "type": "index",
+                "table": full_name,
+                "columns": columns,
+                "estimated_improvement": 0.25,
+                "cost": 0.15,
+                "priority": priority,
+                "status": "pending",
+                "created_at": datetime.utcnow().isoformat(),
+                "query_count": seq_scan,
+                "avg_execution_time_ms": 0.0,
+                "sql_statement": sql_stmt,
+                "reason": reason,
+            })
+        return {"recommendations": result, "total": len(result)}
+    except Exception as e:
+        logger.warning(f"Fallback index recommendations failed: {e}")
+        return {"recommendations": [], "total": 0}
+
+
+def _get_fallback_partition_recommendations(conn) -> list:
+    """Derive partition recommendations from table size/row counts when no recommendations table."""
+    result = []
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                s.schemaname,
+                s.relname AS tablename,
+                COALESCE(s.n_live_tup, 0) AS n_live_tup,
+                pg_total_relation_size(s.schemaname||'.'||s.relname) AS total_bytes
+            FROM pg_stat_user_tables s
+            WHERE s.schemaname IN ('bronze', 'silver', 'gold')
+            ORDER BY pg_total_relation_size(s.schemaname||'.'||s.relname) DESC
+            LIMIT 15
+        """)
+        rows = cursor.fetchall()
+        for i, row in enumerate(rows):
+            schema = row.get("schemaname", "")
+            table = row.get("tablename", "")
+            n_live = int(row.get("n_live_tup", 0) or 0)
+            total_bytes = int(row.get("total_bytes", 0) or 0)
+            full_name = f"{schema}.{table}" if schema else table
+            size_mb = total_bytes / (1024.0 * 1024.0)
+            if n_live < 5000 and size_mb < 1.0:
+                continue
+            priority = "high" if n_live > 100000 or size_mb > 100 else "medium" if n_live > 25000 or size_mb > 10 else "low"
+            reason = f"~{n_live:,} rows, {size_mb:.1f} MB. Partitioning can improve scan and maintenance."
+            result.append({
+                "recommendation_id": f"fallback-partition-{schema}-{table}-{i}",
+                "type": "partition",
+                "table": full_name,
+                "columns": ["created_at", "id"],
+                "estimated_improvement": 0.2,
+                "cost": 0.2,
+                "priority": priority,
+                "status": "pending",
+                "created_at": datetime.utcnow().isoformat(),
+                "query_count": 0,
+                "avg_execution_time_ms": 0.0,
+                "sql_statement": f"-- Consider: CREATE TABLE {full_name}_partitioned (LIKE {full_name}) PARTITION BY RANGE (created_at); -- then migrate data",
+                "reason": reason,
+            })
+        return result
+    except Exception as e:
+        logger.warning(f"Fallback partition recommendations failed: {e}")
+        return []
+
+
 @router.get("/recommendations")
 async def get_optimization_recommendations(
     type: Optional[str] = Query(None, description="Filter by type"),
@@ -63,8 +184,12 @@ async def get_optimization_recommendations(
             table_exists = cursor.fetchone().get('exists', False)
             
             if not table_exists:
-                logger.warning("ml_optimization.index_recommendations table does not exist.")
-                return {"recommendations": [], "total": 0}
+                # Fallback: derive index and/or partition recommendations from table stats
+                index_res = _get_fallback_index_recommendations(conn, type)
+                index_list = index_res.get("recommendations", [])
+                partition_list = _get_fallback_partition_recommendations(conn) if (type is None or type == "partition") else []
+                combined = index_list + partition_list
+                return {"recommendations": combined, "total": len(combined)}
             
             # Build query
             query = """
@@ -74,7 +199,7 @@ async def get_optimization_recommendations(
                     table_name as table,
                     ARRAY[column_name] as columns,
                     CASE 
-                        WHEN estimated_improvement ~ '^[0-9]+\.?[0-9]*$' 
+                        WHEN estimated_improvement::text ~ '^[0-9]+\.?[0-9]*$' 
                         THEN CAST(estimated_improvement AS FLOAT) / 100.0
                         ELSE 0.3
                     END as estimated_improvement,
@@ -105,6 +230,8 @@ async def get_optimization_recommendations(
             
             result = []
             for rec in recommendations:
+                qc = rec.get('query_count', 0) or 0
+                avg_ms = float(rec.get('avg_execution_time_ms', 0) or 0)
                 result.append({
                     "recommendation_id": rec.get('recommendation_id', ''),
                     "type": rec.get('type', 'index'),
@@ -115,9 +242,10 @@ async def get_optimization_recommendations(
                     "priority": rec.get('priority', 'medium'),
                     "status": rec.get('status', 'pending'),
                     "created_at": rec.get('created_at', datetime.utcnow().isoformat()),
-                    "query_count": rec.get('query_count', 0),
-                    "avg_execution_time_ms": float(rec.get('avg_execution_time_ms', 0)),
+                    "query_count": qc,
+                    "avg_execution_time_ms": avg_ms,
                     "sql_statement": rec.get('sql_statement', ''),
+                    "reason": f"Query count: {qc}, avg {avg_ms:.0f} ms — consider index to improve performance.",
                 })
             
             return {"recommendations": result, "total": len(result)}
@@ -184,7 +312,7 @@ async def get_query_performance(
             
             if not table_exists:
                 logger.warning("ml_optimization.query_logs table does not exist.")
-                return {"metrics": [], "total": 0}
+                return {"queries": [], "metrics": [], "total": 0}
             
             # Default to last 7 days if dates not provided
             if not start_date:
@@ -194,25 +322,25 @@ async def get_query_performance(
             
             query = """
                 SELECT 
-                    query_id::text as query_id,
-                    MD5(query_text) as query_hash,
+                    query_hash::text as query_id,
+                    query_hash::text as query_hash,
                     COUNT(*) as execution_count,
-                    AVG(execution_time_ms) as avg_execution_time,
-                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY execution_time_ms) as p50_execution_time,
-                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY execution_time_ms) as p95_execution_time,
-                    PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY execution_time_ms) as p99_execution_time,
-                    SUM(execution_time_ms) as total_execution_time,
-                    MAX(executed_at) as last_executed
+                    AVG(mean_exec_time_ms) as avg_execution_time,
+                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mean_exec_time_ms) as p50_execution_time,
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY mean_exec_time_ms) as p95_execution_time,
+                    PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY mean_exec_time_ms) as p99_execution_time,
+                    SUM(COALESCE(total_exec_time_ms, mean_exec_time_ms * NULLIF(calls, 0), 0)) as total_execution_time,
+                    MAX(collected_at) as last_executed
                 FROM ml_optimization.query_logs
-                WHERE executed_at >= %s::date AND executed_at <= %s::date
+                WHERE collected_at::date >= %s::date AND collected_at::date <= %s::date
             """
             params = [start_date, end_date]
             
             if query_id:
-                query += " AND query_id = %s"
+                query += " AND query_hash::text = %s"
                 params.append(query_id)
             
-            query += " GROUP BY query_id, MD5(query_text) ORDER BY total_execution_time DESC LIMIT %s"
+            query += " GROUP BY query_hash ORDER BY total_execution_time DESC NULLS LAST LIMIT %s"
             params.append(limit)
             
             cursor.execute(query, params)
@@ -233,11 +361,11 @@ async def get_query_performance(
                     "last_executed": metric.get('last_executed', datetime.utcnow()).isoformat() if metric.get('last_executed') else datetime.utcnow().isoformat(),
                 })
             
-            return {"metrics": result, "total": len(result)}
+            return {"queries": result, "metrics": result, "total": len(result)}
             
     except Exception as e:
         logger.error(f"Error fetching query performance: {e}", exc_info=True)
-        return {"metrics": [], "total": 0}
+        return {"queries": [], "metrics": [], "total": 0}
 
 
 @router.get("/history")

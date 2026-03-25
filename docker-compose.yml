@@ -9,6 +9,20 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: dw_postgres
+    # Tuning aligned with infrastructure/docker/postgres/postgresql.conf (not auto-mounted).
+    # Larger max_wal_size reduces checkpoint frequency under bulk ETL / WAL-heavy loads.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_buffers=16MB
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}

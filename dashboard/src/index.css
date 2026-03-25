@@ -1,0 +1,67 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-base: #0a0d18;
+  --color-surface: #111628;
+  --color-surface-alt: #0c0f1a;
+  --color-ink: #e0e8f5;
+  --color-ink-soft: #a0b0cc;
+  --color-ink-muted: #5a6a8a;
+  --color-ink-faint: #3a4a6a;
+  --color-topo-1: #f87171;
+  --color-topo-2: #f59e0b;
+  --color-topo-3: #fbbf24;
+  --color-topo-4: #34d399;
+  --color-topo-5: #3ecfff;
+  --color-topo-6: #818cf8;
+  --color-topo-bronze: #e07a3a;
+  --color-topo-silver: #8a9aaa;
+  --color-topo-gold: #c4a43a;
+  --color-contour: rgba(255,255,255,0.06);
+  --color-contour-strong: #1e2540;
+  --color-grid: rgba(255,255,255,0.03);
+  --font-body: 'Outfit', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-base);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-topo-5);
+  color: var(--color-base);
+}
+
+.topo-bg {
+  background-image:
+    radial-gradient(ellipse 800px 600px at 15% 20%, rgba(62,207,255,0.03) 0%, transparent 70%),
+    radial-gradient(ellipse 600px 800px at 85% 70%, rgba(129,140,248,0.025) 0%, transparent 70%),
+    radial-gradient(ellipse 500px 500px at 50% 40%, rgba(52,211,153,0.02) 0%, transparent 70%);
+}
+
+.grid-dots {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s ease-out forwards;
+  opacity: 0;
+}
+
+* { scrollbar-width: thin; scrollbar-color: #1e2540 transparent; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1e2540; border-radius: 3px; }

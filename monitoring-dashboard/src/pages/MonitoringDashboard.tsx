@@ -26,11 +26,12 @@ import { PipelineDAG } from '../components/monitoring/PipelineDAG';
 import { DataFreshness } from '../components/monitoring/DataFreshness';
 import { ErrorRetryTracker } from '../components/monitoring/ErrorRetryTracker';
 import { DataQualityMetrics } from '../components/monitoring/DataQualityMetrics';
-import { ThroughputMetrics } from '../components/monitoring/ThroughputMetrics';
 import { ApiStatusChecker } from '../components/common/ApiStatusChecker';
 import { apiService } from '../services/api';
+import { useThemeColors } from '../theme/useThemeColors';
 
 export const MonitoringDashboard: React.FC = () => {
+  const colors = useThemeColors();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
@@ -377,11 +378,6 @@ export const MonitoringDashboard: React.FC = () => {
         <Box sx={{ mb: 4 }}>
           <ETLJobStatus refreshKey={refreshKey} />
         </Box>
-
-        {/* Throughput Metrics */}
-        <Box sx={{ mb: 4 }}>
-          <ThroughputMetrics refreshKey={refreshKey} />
-        </Box>
         
         {/* Data Freshness & SLA */}
         <Box sx={{ mb: 4 }}>
@@ -395,8 +391,8 @@ export const MonitoringDashboard: React.FC = () => {
             <Card
               elevation={0}
               sx={{
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
+                background: colors.paper,
+                border: `1px solid ${colors.border}`,
                 borderRadius: 2,
                 height: '100%',
               }}
@@ -406,7 +402,7 @@ export const MonitoringDashboard: React.FC = () => {
                   variant="h6"
                   sx={{
                     fontWeight: 600,
-                    color: '#0f172a',
+                    color: '#fff',
                     fontSize: '1rem',
                     mb: 3,
                   }}
@@ -416,7 +412,7 @@ export const MonitoringDashboard: React.FC = () => {
                 
                 {loading ? (
                   <Box sx={{ textAlign: 'center', py: 4 }}>
-                    <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+                    <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
                       Loading insights...
                     </Typography>
                   </Box>
@@ -428,22 +424,22 @@ export const MonitoringDashboard: React.FC = () => {
                         elevation={0}
                         sx={{
                           p: 2,
-                          background: '#fef2f2',
-                          border: '1px solid #fecaca',
+                          background: colors.errorLight,
+                          border: `1px solid ${colors.error}30`,
                           borderRadius: 1.5,
                         }}
                       >
                         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 1.5 }}>
-                          <Warning sx={{ fontSize: 20, color: '#dc2626', mt: 0.25 }} />
+                          <Warning sx={{ fontSize: 20, color: colors.error, mt: 0.25 }} />
                           <Box sx={{ flex: 1 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 600, color: '#0f172a', mb: 0.5 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 600, color: colors.text, mb: 0.5 }}>
                               {anomaly.title || anomaly.message || anomaly.description || 'Anomaly Detected'}
                             </Typography>
-                            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.8125rem', lineHeight: 1.5 }}>
+                            <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.8125rem', lineHeight: 1.5 }}>
                               {anomaly.description || anomaly.details || anomaly.message || 'Anomaly detected in system behavior.'}
                             </Typography>
                             {anomaly.root_cause && (
-                              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', display: 'block', mt: 0.5, fontStyle: 'italic' }}>
+                              <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem', display: 'block', mt: 0.5, fontStyle: 'italic' }}>
                                 Likely root cause: {anomaly.root_cause}
                               </Typography>
                             )}
@@ -455,15 +451,15 @@ export const MonitoringDashboard: React.FC = () => {
                               label={`Confidence: ${Math.round(anomaly.confidence * 100)}%`}
                               size="small"
                               sx={{
-                                backgroundColor: '#fef3c7',
-                                color: '#92400e',
+                                backgroundColor: colors.warningLight,
+                                color: colors.warning,
                                 fontSize: '0.6875rem',
                                 height: '20px',
                                 fontWeight: 500,
                               }}
                             />
                           )}
-                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                          <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem' }}>
                             Advisory - Review recommended
                           </Typography>
                         </Box>
@@ -472,8 +468,8 @@ export const MonitoringDashboard: React.FC = () => {
                   </Box>
                 ) : (
                   <Box sx={{ textAlign: 'center', py: 4 }}>
-                    <CheckCircle sx={{ fontSize: 40, color: '#10b981', mb: 1.5 }} />
-                    <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+                    <CheckCircle sx={{ fontSize: 40, color: colors.success, mb: 1.5 }} />
+                    <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
                       No anomalies detected. All systems operating normally.
                     </Typography>
                   </Box>

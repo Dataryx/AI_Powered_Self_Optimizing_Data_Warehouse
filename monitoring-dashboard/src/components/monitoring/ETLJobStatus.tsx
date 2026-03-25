@@ -30,17 +30,15 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
   const colors = useThemeColors();
   const [jobs, setJobs] = useState<ETLJob[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
 
   const fetchJobs = useCallback(async () => {
     try {
       setError(null);
-      const data = await apiService.getETLJobs();
-      console.log('Fetched ETL jobs:', data.jobs?.length || 0);
-      setJobs(data.jobs || []);
-      setLastFetch(new Date());
+      const data = (await apiService.getETLJobs()) as any;
+      console.log('Fetched ETL jobs:', data?.jobs?.length || 0);
+      setJobs(data?.jobs || []);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching ETL jobs:', err);
@@ -52,13 +50,12 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
 
   // WebSocket connection for real-time updates with HTTP fallback
   useEffect(() => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000';
     const wsUrl = `${wsHost}/api/v1/ws/etl-jobs`;
     
     let ws: WebSocket | null = null;
-    let reconnectTimeout: NodeJS.Timeout;
-    let httpPollInterval: NodeJS.Timeout;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | undefined;
+    let httpPollInterval: ReturnType<typeof setInterval> | undefined;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 3;
     let useWebSocket = true;
@@ -80,6 +77,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
           // Clear HTTP polling when WebSocket is connected
           if (httpPollInterval) {
             clearInterval(httpPollInterval);
+            httpPollInterval = undefined;
           }
         };
         
@@ -88,7 +86,6 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
             const data = JSON.parse(event.data);
             if (data.type === 'etl_jobs') {
               setJobs(data.jobs || []);
-              setLastFetch(new Date());
               setLoading(false);
             } else if (data.type === 'error') {
               console.error('WebSocket error message:', data.message);
@@ -285,7 +282,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
   };
 
   return (
-    <Card elevation={0} sx={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 2 }}>
+    <Card elevation={0} sx={{ background: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 2 }}>
       <CardContent sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Box>
@@ -293,14 +290,14 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
               variant="h6"
               sx={{
                 fontWeight: 600,
-                color: colors.text,
+                color: '#fff',
                 fontSize: '1rem',
                 mb: 0.5,
               }}
             >
               Recent ETL Runs
             </Typography>
-            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+            <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.75rem' }}>
               Last 24h
             </Typography>
           </Box>
@@ -309,12 +306,12 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
               label={wsConnected ? 'Live' : 'Polling'}
               size="small"
               sx={{
-                backgroundColor: wsConnected ? '#f0fdf4' : '#f1f5f9',
-                color: wsConnected ? '#166534' : '#64748b',
+                backgroundColor: wsConnected ? `${colors.success}15` : `${colors.textMuted}12`,
+                color: wsConnected ? colors.success : colors.textSecondary,
                 fontWeight: 500,
                 fontSize: '0.6875rem',
                 height: '22px',
-                border: `1px solid ${wsConnected ? '#bbf7d0' : '#e2e8f0'}`,
+                border: `1px solid ${wsConnected ? `${colors.success}35` : colors.border}`,
               }}
             />
             <IconButton
@@ -322,7 +319,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
               onClick={fetchJobs}
               sx={{
                 color: colors.primary,
-                '&:hover': { backgroundColor: '#f1f5f9' },
+                '&:hover': { backgroundColor: colors.background },
               }}
             >
               <Refresh sx={{ fontSize: 18 }} />
@@ -332,20 +329,20 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
 
         {displayJobs.length === 0 ? (
           <Box sx={{ textAlign: 'center', py: 6 }}>
-            <Schedule sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
-            <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.875rem' }}>
+            <Schedule sx={{ fontSize: 40, color: colors.textMuted, mb: 1.5 }} />
+            <Typography variant="body2" sx={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
               No recent pipeline runs
             </Typography>
           </Box>
         ) : (
-          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 1.5 }}>
+          <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${colors.border}`, borderRadius: 1.5, background: colors.paper }}>
             <Table sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow sx={{ backgroundColor: colors.background }}>
-                  <TableCell sx={{ fontWeight: 600, color: '#475569', fontSize: '0.8125rem', py: 1.5, borderBottom: '1px solid #e2e8f0' }}>
+                  <TableCell sx={{ fontWeight: 700, color: colors.textMuted, fontSize: '0.8125rem', py: 1.5, borderBottom: `1px solid ${colors.border}` }}>
                     Pipeline
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 600, color: '#475569', fontSize: '0.8125rem', py: 1.5, borderBottom: '1px solid #e2e8f0' }}>
+                  <TableCell sx={{ fontWeight: 700, color: colors.textMuted, fontSize: '0.8125rem', py: 1.5, borderBottom: `1px solid ${colors.border}` }}>
                     Status
                   </TableCell>
                   <TableCell sx={{ fontWeight: 600, color: '#475569', fontSize: '0.8125rem', py: 1.5, borderBottom: '1px solid #e2e8f0' }}>

@@ -30,9 +30,20 @@ interface DataFreshnessProps {
   refreshKey?: number;
 }
 
+interface DatasetItem {
+  name: string;
+  layer: string;
+  status: string;
+  last_updated?: string;
+  records?: number;
+  hours_ago?: number;
+  sla_lag?: string;
+}
+
 export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) => {
   const colors = useThemeColors();
   const [freshness, setFreshness] = useState<FreshnessData>({});
+  const [datasets, setDatasets] = useState<DatasetItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
@@ -40,9 +51,9 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
   const fetchFreshness = useCallback(async () => {
     try {
       setError(null);
-      const data = (await apiService.getDataFreshness()) as { freshness?: FreshnessData };
-      console.log('Fetched data freshness:', data);
+      const data = (await apiService.getDataFreshness()) as { freshness?: FreshnessData; datasets?: DatasetItem[] };
       setFreshness(data.freshness || {});
+      setDatasets(Array.isArray(data.datasets) ? data.datasets : []);
       setLastFetch(new Date());
       setLoading(false);
     } catch (err) {
@@ -194,16 +205,30 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
     return { status: 'breach', label: 'SLA breach', color: colors.error };
   };
 
-  // Get all tables across layers for dataset-centric view
-  const allTables = layers.flatMap((layer) => {
-    const layerData = freshness[layer];
-    if (!layerData?.tables) return [];
-    return layerData.tables.map((table) => ({
-      ...table,
-      layer,
-      layerName: layerNames[layer as keyof typeof layerNames],
-    }));
-  });
+  // Prefer full datasets from API (includes all tables); fallback to per-layer tables. Sort so SLA breach first.
+  const allTablesRaw =
+    datasets.length > 0
+      ? datasets.map((d) => ({
+          table: d.name,
+          layer: d.layer,
+          layerName: layerNames[d.layer as keyof typeof layerNames],
+          hours_ago: d.hours_ago ?? 24,
+          status: d.status ?? 'outdated',
+          total_records: d.records ?? 0,
+        }))
+      : layers.flatMap((layer) => {
+          const layerData = freshness[layer];
+          if (!layerData?.tables) return [];
+          return layerData.tables.map((table) => ({
+            ...table,
+            layer,
+            layerName: layerNames[layer as keyof typeof layerNames],
+          }));
+        });
+  const severityOrder = { breach: 0, 'at-risk': 1, 'on-time': 2 };
+  const allTables = [...allTablesRaw].sort(
+    (a, b) => severityOrder[getSLAStatus(a.hours_ago).status as keyof typeof severityOrder] - severityOrder[getSLAStatus(b.hours_ago).status as keyof typeof severityOrder]
+  );
 
   const onTimeCount = allTables.filter((t) => getSLAStatus(t.hours_ago).status === 'on-time').length;
   const atRiskCount = allTables.filter((t) => getSLAStatus(t.hours_ago).status === 'at-risk').length;
@@ -218,7 +243,7 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
               variant="h6"
               sx={{
                 fontWeight: 600,
-                color: colors.text,
+                color: '#fff',
                 fontSize: '1rem',
                 mb: 0.5,
               }}
@@ -234,7 +259,7 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
             onClick={fetchFreshness}
             sx={{
               color: colors.primary,
-              '&:hover': { backgroundColor: '#f1f5f9' },
+              '&:hover': { backgroundColor: colors.background },
             }}
           >
             <Refresh sx={{ fontSize: 18 }} />
@@ -316,7 +341,7 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
                     >
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
                         <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5, flexWrap: 'wrap' }}>
                             {getLayerIcon(table.layer)}
                             <Typography
                               variant="body2"
@@ -328,10 +353,25 @@ export const DataFreshness: React.FC<DataFreshnessProps> = ({ refreshKey = 0 }) 
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
                                 flex: 1,
+                                minWidth: 0,
                               }}
                             >
                               {table.table}
                             </Typography>
+                            {slaStatus.status === 'breach' && (
+                              <Chip
+                                label="SLA Breach"
+                                size="small"
+                                sx={{
+                                  backgroundColor: colors.error + '25',
+                                  color: colors.error,
+                                  fontWeight: 700,
+                                  fontSize: '0.65rem',
+                                  height: '18px',
+                                  border: `1px solid ${colors.error}50`,
+                                }}
+                              />
+                            )}
                           </Box>
                         </Box>
                         {getStatusIcon(table.status)}

@@ -85,8 +85,8 @@ class QueryAnomalyDetector:
         available_cols = [col for col in feature_cols if col in metrics.columns]
         features = metrics[available_cols].copy()
         
-        # Fill missing values
-        features = features.fillna(0)
+        # Fill missing values and convert to float (PostgreSQL NUMERIC comes as Decimal)
+        features = features.fillna(0).astype(float)
         
         # Log transform execution time
         if 'mean_exec_time_ms' in features.columns:
