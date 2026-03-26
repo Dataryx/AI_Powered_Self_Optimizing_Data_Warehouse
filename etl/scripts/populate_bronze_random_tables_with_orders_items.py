@@ -36,6 +36,9 @@ JOB_NAME = "BRONZE - Random Bronze Tables Populator (100)"
 JOB_TYPE = "ingestion"
 TRACK_LAYER = "bronze"
 
+# High IDs reserved for minimal reference seed rows (FK-safe order/order_item when pools are empty).
+FK_SEED_ID = 7_000_001
+
 
 def _rand_str(prefix: str, length: int) -> str:
     letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -51,24 +54,121 @@ def _rand_date_within(days_back: int = 3650) -> date:
     return (date.today() - timedelta(days=random.randint(0, days_back)))
 
 
-def _load_id_pool(connection, table: str, id_col: str) -> List[int]:
+def _load_ids_from_cursor(cur, table: str, id_col: str) -> List[int]:
     try:
-        with connection.cursor() as cur:
-            cur.execute(f"SELECT {id_col} FROM bronze.{table}")
-            rows = cur.fetchall()
-        return [int(r[0]) for r in rows if r and r[0] is not None]
+        cur.execute(f"SELECT {id_col} FROM bronze.{table}")
+        return [int(r[0]) for r in cur.fetchall() if r and r[0] is not None]
     except Exception:
         return []
 
 
-def _load_id_pools() -> Dict[str, List[int]]:
-    with get_db_connection() as conn:
-        pools = {
-            "customer_ids": _load_id_pool(conn, "customer", "customer_id"),
-            "employee_ids": _load_id_pool(conn, "employment", "employee_id"),
-            "product_ids": _load_id_pool(conn, "product", "product_id"),
+def _load_id_pools_from_conn(conn) -> Dict[str, List[int]]:
+    with conn.cursor() as cur:
+        return {
+            "country_ids": _load_ids_from_cursor(cur, "country", "country_id"),
+            "location_ids": _load_ids_from_cursor(cur, "location", "location_id"),
+            "warehouse_ids": _load_ids_from_cursor(cur, "warehouse", "warehouse_id"),
+            "product_ids": _load_ids_from_cursor(cur, "product", "product_id"),
+            "person_ids": _load_ids_from_cursor(cur, "person", "person_id"),
+            "company_ids": _load_ids_from_cursor(cur, "customer_company", "company_id"),
+            "customer_employee_ids": _load_ids_from_cursor(cur, "customer_employee", "customer_employee_id"),
+            "customer_ids": _load_ids_from_cursor(cur, "customer", "customer_id"),
+            "employee_ids": _load_ids_from_cursor(cur, "employment", "employee_id"),
+            "hr_job_ids": _load_ids_from_cursor(cur, "employment_jobs", "hr_job_id"),
         }
-        return pools
+
+
+def ensure_bronze_fk_seed(cur, batch_id: int) -> None:
+    """One row per referenced table so orders / order_item / random rows satisfy bronze FKs."""
+    s = FK_SEED_ID
+    cur.execute(
+        """
+        INSERT INTO bronze.country (country_id, country_name, country_code, nat_lang_code, currency_code, _batch_id)
+        VALUES (%s, 'FK Seed Country', 'USA', 1, 'USD', %s)
+        ON CONFLICT (country_id) DO NOTHING
+        """,
+        (s, batch_id),
+    )
+    cur.execute(
+        """
+        INSERT INTO bronze.location (
+            location_id, country_id, countries_country_id, address_line_1, address_line_2,
+            city, state, district, postal_code, location_type_code, description, shipping_notes, _batch_id
+        ) VALUES (%s, %s, %s, '1 Seed St', '', 'Seed City', 'CA', '', '90000', 1, '', '', %s)
+        ON CONFLICT (location_id) DO NOTHING
+        """,
+        (s, s, s, batch_id),
+    )
+    cur.execute(
+        """
+        INSERT INTO bronze.warehouse (warehouse_id, location_id, warehouse_name, _batch_id)
+        VALUES (%s, %s, 'Seed Warehouse', %s)
+        ON CONFLICT (warehouse_id) DO NOTHING
+        """,
+        (s, s, batch_id),
+    )
+    cur.execute(
+        """
+        INSERT INTO bronze.product (
+            product_id, product_name, description, category, weight_class, warranty_period,
+            supplier_id, status, list_price, minimum_price, price_currency, catalog_url, _batch_id
+        ) VALUES (%s, 'FK Seed Product', 'seed', 1, 1, 12, 1, 'Active', 99.99, 49.99, 'USD', '', %s)
+        ON CONFLICT (product_id) DO NOTHING
+        """,
+        (s, batch_id),
+    )
+    cur.execute(
+        """
+        INSERT INTO bronze.person (
+            person_id, first_name, last_name, middle_names, nickname,
+            nat_lang_code, culture_code, gender, _batch_id
+        ) VALUES (%s, 'Seed', 'Person', '', '', 1, 1, 'M', %s)
+        ON CONFLICT (person_id) DO NOTHING
+        """,
+        (s, batch_id),
+    )
+    cur.execute(
+        """
+        INSERT INTO bronze.customer_company (
+            company_id, company_name, company_credit_limit, credit_limit_currency, _batch_id
+        ) VALUES (%s, 'FK Seed Company', 100000.00, 'USD', %s)
+        ON CONFLICT (company_id) DO NOTHING
+        """,
+        (s, batch_id),
+    )
+    cur.execute(
+        """
+        INSERT INTO bronze.employment_jobs (
+            hr_job_id, countries_country_id, job_title, min_salary, max_salary, _batch_id
+        ) VALUES (%s, %s, 'Seed Job', 40000, 120000, %s)
+        ON CONFLICT (hr_job_id) DO NOTHING
+        """,
+        (s, s, batch_id),
+    )
+    cur.execute(
+        """
+        INSERT INTO bronze.employment (
+            employee_id, person_id, hr_job_id, manager_employee_id, start_date, end_date,
+            salary, commission_percent, employment_status, _batch_id
+        ) VALUES (%s, %s, %s, NULL, CURRENT_DATE, NULL, 80000, 0, 'ACTIVE', %s)
+        ON CONFLICT (employee_id) DO NOTHING
+        """,
+        (s, s, s, batch_id),
+    )
+    cur.execute(
+        """
+        INSERT INTO bronze.customer (
+            customer_id, person_id, customer_employee_id, accountmgr_id, income_level, _batch_id
+        ) VALUES (%s, %s, NULL, NULL, 5, %s)
+        ON CONFLICT (customer_id) DO NOTHING
+        """,
+        (s, s, batch_id),
+    )
+
+
+def _pick_fk(pools: Dict[str, List[int]], key: str) -> int:
+    ids = pools.get(key) or []
+    return random.choice(ids) if ids else FK_SEED_ID
 
 
 def _generate_orders_and_items(
@@ -95,18 +195,14 @@ def _generate_orders_and_items(
     max_order_id = 214_748_363
     order_ids = [(int(now.timestamp()) % max_order_id) + i + 1 for i in range(order_count)]
 
-    customer_ids = pools.get("customer_ids") or []
-    employee_ids = pools.get("employee_ids") or []
-    product_ids = pools.get("product_ids") or []
-
     def pick_customer() -> int:
-        return random.choice(customer_ids) if customer_ids else random.randint(1, 150_000)
+        return _pick_fk(pools, "customer_ids")
 
     def pick_employee() -> int:
-        return random.choice(employee_ids) if employee_ids else random.randint(1, 1_000)
+        return _pick_fk(pools, "employee_ids")
 
     def pick_product() -> int:
-        return random.choice(product_ids) if product_ids else random.randint(1, 50_000)
+        return _pick_fk(pools, "product_ids")
 
     order_rows: List[Tuple[Any, ...]] = []
     order_item_rows: List[Tuple[Any, ...]] = []
@@ -169,10 +265,11 @@ def _generate_orders_and_items(
     return patched_orders, order_item_rows
 
 
-def _other_table_generators(batch_id: int) -> Dict[str, Any]:
+def _other_table_generators(batch_id: int, pools: Dict[str, List[int]]) -> Dict[str, Any]:
     """
     Returns a dict:
       table_name -> function(n) returning list of row tuples suitable for execute_batch.
+    ``pools`` holds current bronze natural keys for FK-safe random rows.
     """
 
     def gen_country(n: int) -> List[Tuple[Any, ...]]:
@@ -195,11 +292,11 @@ def _other_table_generators(batch_id: int) -> Dict[str, Any]:
         rows = []
         for _ in range(n):
             location_id = random.randint(1, 1_000_000)
-            country_id = random.randint(1, 50_000)
+            cid = _pick_fk(pools, "country_ids")
             rows.append(
                 (
                     location_id,
-                    country_id,
+                    cid,
                     _rand_str("Addr", 6)[:100],
                     _rand_str("Addr2", 6)[:100],
                     _rand_str("City", 6)[:50],
@@ -209,7 +306,7 @@ def _other_table_generators(batch_id: int) -> Dict[str, Any]:
                     random.randint(1, 999),
                     _rand_str("Desc", 12)[:256],
                     _rand_str("Ship", 16)[:512],
-                    country_id,
+                    cid,
                     batch_id,
                 )
             )
@@ -219,7 +316,7 @@ def _other_table_generators(batch_id: int) -> Dict[str, Any]:
         rows = []
         for _ in range(n):
             warehouse_id = random.randint(1, 500_000)
-            location_id = random.randint(1, 1_000_000)
+            location_id = _pick_fk(pools, "location_ids")
             rows.append((warehouse_id, location_id, _rand_str("WH", 4)[:100], batch_id))
         return rows
 
@@ -252,8 +349,8 @@ def _other_table_generators(batch_id: int) -> Dict[str, Any]:
         rows = []
         for _ in range(n):
             inventory_id = random.randint(1, 1_000_000)
-            product_id = random.randint(1, 50_000)
-            warehouse_id = random.randint(1, 500_000)
+            product_id = _pick_fk(pools, "product_ids")
+            warehouse_id = _pick_fk(pools, "warehouse_ids")
             on_hand = random.randint(0, 20000)
             available = random.randint(0, on_hand) if on_hand > 0 else 0
             rows.append((inventory_id, product_id, warehouse_id, on_hand, available, batch_id))
@@ -281,13 +378,15 @@ def _other_table_generators(batch_id: int) -> Dict[str, Any]:
         return rows
 
     def gen_restricted_info(n: int) -> List[Tuple[Any, ...]]:
-        rows = []
-        for _ in range(n):
-            person_id = random.randint(1, 150_000)
+        pool = list({*pools.get("person_ids")}) or [FK_SEED_ID]
+        random.shuffle(pool)
+        rows: List[Tuple[Any, ...]] = []
+        for i in range(min(n, len(pool))):
+            person_id = pool[i]
             dob = _rand_date_within(12000)
-            dod = None  # keep null most of the time
+            dod = None
             if random.random() < 0.1:
-                dod = _rand_date_within((date.today() - dob).days)  # may be before dob; still valid types-wise
+                dod = _rand_date_within(max(1, (date.today() - dob).days))
             rows.append(
                 (
                     person_id,
@@ -321,7 +420,7 @@ def _other_table_generators(batch_id: int) -> Dict[str, Any]:
         rows = []
         for _ in range(n):
             customer_employee_id = random.randint(1, 200_000)
-            company_id = random.randint(1, 20_000)
+            company_id = _pick_fk(pools, "company_ids")
             rows.append(
                 (
                     customer_employee_id,
@@ -338,10 +437,11 @@ def _other_table_generators(batch_id: int) -> Dict[str, Any]:
 
     def gen_customer(n: int) -> List[Tuple[Any, ...]]:
         rows = []
+        ce_pool = pools.get("customer_employee_ids") or []
         for _ in range(n):
             customer_id = random.randint(1, 150_000)
-            person_id = random.randint(1, 150_000)
-            customer_employee_id = random.randint(1, 200_000)
+            person_id = _pick_fk(pools, "person_ids")
+            customer_employee_id = random.choice(ce_pool) if ce_pool and random.random() < 0.5 else None
             rows.append(
                 (
                     customer_id,
@@ -361,7 +461,7 @@ def _other_table_generators(batch_id: int) -> Dict[str, Any]:
             rows.append(
                 (
                     hr_job_id,
-                    random.randint(1, 50_000),  # countries_country_id
+                    _pick_fk(pools, "country_ids"),
                     _rand_str("Job", 8)[:100],
                     _rand_decimal(1000.0, 100_000.0, 2),
                     _rand_decimal(1000.0, 100_000.0, 2),
@@ -378,11 +478,11 @@ def _other_table_generators(batch_id: int) -> Dict[str, Any]:
             rows.append(
                 (
                     employee_id,
-                    random.randint(1, 150_000),  # person_id
-                    random.randint(1, 50_000),  # hr_job_id
-                    random.randint(1, 20_000),  # manager_employee_id
+                    _pick_fk(pools, "person_ids"),
+                    _pick_fk(pools, "hr_job_ids"),
+                    None,
                     _rand_date_within(5000),
-                    None,  # end_date (null allowed)
+                    None,
                     _rand_decimal(1000.0, 200_000.0, 2),
                     _rand_decimal(0.0, 50.0, 2),
                     random.choice(statuses),
@@ -424,14 +524,6 @@ def run_once(count: int) -> None:
     logger = logging.getLogger(__name__)
     batch_id = int(datetime.now(UTC).timestamp() // 60)
 
-    pools = _load_id_pools()
-    if not pools["customer_ids"]:
-        logger.warning("bronze.customer is empty; orders.customer_id will be generated as random IDs.")
-    if not pools["employee_ids"]:
-        logger.warning("bronze.employment is empty; orders.sales_rep_id will be generated as random IDs.")
-    if not pools["product_ids"]:
-        logger.warning("bronze.product is empty; order_item.product_id will be generated as random IDs.")
-
     tracker = ETLJobTracker()
     tracker.ensure_table_exists()
 
@@ -461,9 +553,14 @@ def run_once(count: int) -> None:
         other_counts[t] += 1
         remaining -= 1
 
-    other_generators = _other_table_generators(batch_id)
-
     with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            ensure_bronze_fk_seed(cur, batch_id)
+        conn.commit()
+
+        pools = _load_id_pools_from_conn(conn)
+        other_generators = _other_table_generators(batch_id, pools)
+
         # 1) Orders
         orders_job_run_id = tracker.start_job(
             JOB_NAME,
@@ -550,6 +647,7 @@ def run_once(count: int) -> None:
                             INSERT INTO bronze.country
                               (country_id, country_name, country_code, nat_lang_code, currency_code, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (country_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -562,6 +660,7 @@ def run_once(count: int) -> None:
                               (location_id, country_id, address_line_1, address_line_2, city, state, district,
                                postal_code, location_type_code, description, shipping_notes, countries_country_id, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (location_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -573,6 +672,7 @@ def run_once(count: int) -> None:
                             INSERT INTO bronze.warehouse
                               (warehouse_id, location_id, warehouse_name, _batch_id)
                             VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (warehouse_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -585,6 +685,20 @@ def run_once(count: int) -> None:
                               (product_id, product_name, description, category, weight_class, warranty_period,
                                supplier_id, status, list_price, minimum_price, price_currency, catalog_url, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (product_id) DO UPDATE SET
+                                product_name = EXCLUDED.product_name,
+                                description = EXCLUDED.description,
+                                category = EXCLUDED.category,
+                                weight_class = EXCLUDED.weight_class,
+                                warranty_period = EXCLUDED.warranty_period,
+                                supplier_id = EXCLUDED.supplier_id,
+                                status = EXCLUDED.status,
+                                list_price = EXCLUDED.list_price,
+                                minimum_price = EXCLUDED.minimum_price,
+                                price_currency = EXCLUDED.price_currency,
+                                catalog_url = EXCLUDED.catalog_url,
+                                _batch_id = EXCLUDED._batch_id,
+                                _load_timestamp = CURRENT_TIMESTAMP
                             """,
                             rows,
                             page_size=len(rows),
@@ -596,6 +710,7 @@ def run_once(count: int) -> None:
                             INSERT INTO bronze.inventory
                               (inventory_id, product_id, warehouse_id, quantity_on_hand, quantity_available, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (inventory_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -607,6 +722,7 @@ def run_once(count: int) -> None:
                             INSERT INTO bronze.person
                               (person_id, first_name, last_name, middle_names, nickname, nat_lang_code, culture_code, gender, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (person_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -618,6 +734,7 @@ def run_once(count: int) -> None:
                             INSERT INTO bronze.restricted_info
                               (person_id, date_of_birth, date_of_death, government_id, passport_id, hire_date, seniority_code, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (person_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -629,6 +746,7 @@ def run_once(count: int) -> None:
                             INSERT INTO bronze.customer_company
                               (company_id, company_name, company_credit_limit, credit_limit_currency, _batch_id)
                             VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (company_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -641,6 +759,7 @@ def run_once(count: int) -> None:
                               (customer_employee_id, company_id, badge_number, job_title, department,
                                credit_limit, credit_limit_currency, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (customer_employee_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -652,6 +771,7 @@ def run_once(count: int) -> None:
                             INSERT INTO bronze.customer
                               (customer_id, person_id, customer_employee_id, accountmgr_id, income_level, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (customer_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -663,6 +783,7 @@ def run_once(count: int) -> None:
                             INSERT INTO bronze.employment_jobs
                               (hr_job_id, countries_country_id, job_title, min_salary, max_salary, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (hr_job_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),
@@ -675,6 +796,7 @@ def run_once(count: int) -> None:
                               (employee_id, person_id, hr_job_id, manager_employee_id, start_date, end_date,
                                salary, commission_percent, employment_status, _batch_id)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (employee_id) DO NOTHING
                             """,
                             rows,
                             page_size=len(rows),

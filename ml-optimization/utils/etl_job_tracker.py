@@ -175,6 +175,7 @@ class ETLJobTracker:
             run_id: Unique identifier for this specific job run
         """
         run_id = str(uuid.uuid4())
+        now = datetime.now()
         
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -216,9 +217,9 @@ class ETLJobTracker:
                     (run_id, job_id, status, trigger_source, progress,
                      layer, table_name, records_total, metadata, started_at, updated_at)
                 VALUES (%s, %s, 'running', 'cron', 0,
-                        %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        %s, %s, %s, %s, %s, %s)
                 """,
-                (run_id, job_id, layer, table_name, records_total, metadata),
+                (run_id, job_id, layer, table_name, records_total, metadata, now, now),
             )
 
             # Update job definition with last run info
@@ -252,6 +253,7 @@ class ETLJobTracker:
             records_processed: Number of records processed so far
         """
         progress = max(0, min(100, progress))
+        now = datetime.now()
         
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -262,22 +264,22 @@ class ETLJobTracker:
                     UPDATE monitoring.job_runs
                     SET progress = %s,
                         records_processed = %s,
-                        updated_at = CURRENT_TIMESTAMP
+                        updated_at = %s
                     WHERE run_id = %s
                     RETURNING job_id
                     """,
-                    (progress, records_processed, job_id),
+                    (progress, records_processed, now, job_id),
                 )
             else:
                 cursor.execute(
                     """
                     UPDATE monitoring.job_runs
                     SET progress = %s,
-                        updated_at = CURRENT_TIMESTAMP
+                        updated_at = %s
                     WHERE run_id = %s
                     RETURNING job_id
                     """,
-                    (progress, job_id),
+                    (progress, now, job_id),
                 )
             conn.commit()
     
@@ -295,6 +297,7 @@ class ETLJobTracker:
             records_processed: Final number of records processed
             metadata: Additional metadata to update
         """
+        now = datetime.now()
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
@@ -305,12 +308,12 @@ class ETLJobTracker:
                     SET status = 'completed',
                         progress = 100,
                         records_processed = %s,
-                        completed_at = CURRENT_TIMESTAMP,
+                        completed_at = %s,
                         metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb,
-                        updated_at = CURRENT_TIMESTAMP
+                        updated_at = %s
                     WHERE run_id = %s
                     """,
-                    (records_processed, metadata, job_id),
+                    (records_processed, now, metadata, now, job_id),
                 )
             elif records_processed is not None:
                 cursor.execute(
@@ -319,11 +322,11 @@ class ETLJobTracker:
                     SET status = 'completed',
                         progress = 100,
                         records_processed = %s,
-                        completed_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
+                        completed_at = %s,
+                        updated_at = %s
                     WHERE run_id = %s
                     """,
-                    (records_processed, job_id),
+                    (records_processed, now, now, job_id),
                 )
             else:
                 cursor.execute(
@@ -331,11 +334,11 @@ class ETLJobTracker:
                     UPDATE monitoring.job_runs
                     SET status = 'completed',
                         progress = 100,
-                        completed_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
+                        completed_at = %s,
+                        updated_at = %s
                     WHERE run_id = %s
                     """,
-                    (job_id,),
+                    (now, now, job_id),
                 )
 
             conn.commit()
@@ -358,6 +361,7 @@ class ETLJobTracker:
             error_message: Error message
             metadata: Additional metadata
         """
+        now = datetime.now()
         with get_db_connection() as conn:
             cursor = conn.cursor()
 
@@ -367,12 +371,12 @@ class ETLJobTracker:
                     UPDATE monitoring.job_runs
                     SET status = 'failed',
                         error_message = %s,
-                        completed_at = CURRENT_TIMESTAMP,
+                        completed_at = %s,
                         metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb,
-                        updated_at = CURRENT_TIMESTAMP
+                        updated_at = %s
                     WHERE run_id = %s
                     """,
-                    (error_message, metadata, job_id),
+                    (error_message, now, metadata, now, job_id),
                 )
             else:
                 cursor.execute(
@@ -380,11 +384,11 @@ class ETLJobTracker:
                     UPDATE monitoring.job_runs
                     SET status = 'failed',
                         error_message = %s,
-                        completed_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
+                        completed_at = %s,
+                        updated_at = %s
                     WHERE run_id = %s
                     """,
-                    (error_message, job_id),
+                    (error_message, now, now, job_id),
                 )
 
             logger.error(f"Failed ETL job run: {job_id} - {error_message}")

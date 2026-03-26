@@ -1,4 +1,13 @@
-"""Bronze -> Silver transformer. Moves and cleans raw data into the Silver layer."""
+"""Bronze -> Silver transformer. Moves and cleans raw data into the Silver layer.
+
+Incremental behavior (aligned with append-only bronze loads):
+- Each entity uses DISTINCT ON (business_key) ordered by _load_timestamp DESC so the latest
+  bronze row wins when duplicates exist.
+- Anti-join to silver on the same natural key (e.g. country_id) selects only keys not yet loaded.
+- INSERT ... ON CONFLICT (natural_key) DO NOTHING avoids duplicate silver rows when re-run.
+
+Dependency order in transform_all() matches FKs (e.g. country before location; customer before orders).
+"""
 
 import psycopg2
 from psycopg2.extras import execute_batch
@@ -78,7 +87,7 @@ class BronzeToSilverTransformer:
                 row[0],  # country_id
                 row[1] or 'Unknown',  # country_name
                 (row[2] or 'XXX')[:3],  # country_code
-                row[3],  # nat_lang_code
+                row[3] if row[3] is not None else 1033,  # nat_lang_code
                 (row[4] or 'USD')[:10],  # currency_code
                 True,  # is_valid
                 datetime.now(),  # valid_from
@@ -140,23 +149,29 @@ class BronzeToSilverTransformer:
         for row in bronze_locations:
             country_key = country_map.get(row[1])  # country_id -> country_key
             
-            # Build full address
-            address_parts = [p for p in [row[2], row[3], row[4], row[5], row[7]] if p]
-            full_address = ', '.join(address_parts) if address_parts else None
-            
+            # Build full address (non-empty string for analytics)
+            a1 = (row[2] or '').strip() or 'Address pending'
+            a2 = (row[3] or '').strip()
+            city = (row[4] or '').strip() or 'Unknown'
+            st = (row[5] or '').strip() or 'NA'
+            dist = (row[6] or '').strip() or '—'
+            pc = (row[7] or '').strip() or '00000'
+            address_parts = [p for p in [a1, a2, city, st, pc] if p]
+            full_address = ', '.join(address_parts)
+
             transformed.append((
                 row[0],  # location_id
                 country_key,  # country_key
-                row[2],  # address_line_1
-                row[3],  # address_line_2
-                row[4],  # city
-                row[5],  # state_province
-                row[6],  # district
-                row[7],  # postal_code
-                f"TYPE_{row[8]}" if row[8] else None,  # location_type
-                row[9],  # description
-                row[10],  # shipping_notes
-                full_address,  # full_address
+                a1,
+                a2 or '—',
+                city,
+                st,
+                dist,
+                pc,
+                f"TYPE_{row[8]}" if row[8] is not None else 'TYPE_0',
+                (row[9] or '').strip() or 'No description',
+                (row[10] or '').strip() or 'No shipping notes',
+                full_address,
                 True,  # is_valid
                 datetime.now(),  # valid_from
                 date(9999, 12, 31),  # valid_to
@@ -213,7 +228,7 @@ class BronzeToSilverTransformer:
             transformed.append((
                 row[0],  # warehouse_id
                 location_key,  # location_key
-                row[2] or 'Unknown Warehouse',  # warehouse_name
+                (row[2] or '').strip() or f'Warehouse {row[0]}',  # warehouse_name
                 True,  # is_valid
                 datetime.now(),  # valid_from
                 date(9999, 12, 31),  # valid_to
@@ -270,21 +285,22 @@ class BronzeToSilverTransformer:
         for row in bronze_products:
             weight_classes = {1: 'Light', 2: 'Medium', 3: 'Heavy', 4: 'Very Heavy', 5: 'Extra Heavy'}
             
+            cat_id = row[3]
             transformed.append((
                 row[0],  # product_id
                 row[1] or 'Unknown Product',  # product_name
-                row[2],  # description
-                row[3],  # category_id
-                f"Category_{row[3]}" if row[3] else None,  # category_name
-                row[4],  # weight_class
-                weight_classes.get(row[4], 'Unknown') if row[4] else None,  # weight_class_description
-                row[5],  # warranty_period_months
-                row[6],  # supplier_id
-                row[7] or 'ACTIVE',  # product_status
+                (row[2] or '').strip() or 'No description available',  # description
+                cat_id if cat_id is not None else 0,  # category_id
+                f"Category_{cat_id}" if cat_id is not None else 'Uncategorized',  # category_name
+                row[4] if row[4] is not None else 1,  # weight_class
+                weight_classes.get(row[4], 'Standard') if row[4] is not None else 'Standard',
+                row[5] if row[5] is not None else 0,  # warranty_period_months
+                row[6] if row[6] is not None else 0,  # supplier_id
+                (row[7] or 'ACTIVE').strip()[:20],  # product_status
                 row[8] or 0.0,  # list_price
                 row[9] or 0.0,  # minimum_price
                 (row[10] or 'USD')[:3],  # price_currency
-                row[11],  # catalog_url
+                (row[11] or '').strip() or f'https://catalog.local/product/{row[0]}',  # catalog_url
                 True,  # is_valid
                 datetime.now(),  # valid_from
                 date(9999, 12, 31),  # valid_to
@@ -403,14 +419,14 @@ class BronzeToSilverTransformer:
         
         transformed = []
         for row in bronze_persons:
-            first_name = row[1] or ''
-            last_name = row[2] or ''
-            middle_names = row[3] or ''
-            nickname = row[4] or ''
+            first_name = (row[1] or '').strip() or 'Unknown'
+            last_name = (row[2] or '').strip() or 'Unknown'
+            middle_names = (row[3] or '').strip()
+            nickname = (row[4] or '').strip()
             
             # Build full name
             name_parts = [p for p in [first_name, middle_names, last_name] if p]
-            full_name = ' '.join(name_parts) if name_parts else 'Unknown'
+            full_name = ' '.join(name_parts) if name_parts else 'Unknown Person'
             
             # Display name (prefer nickname if available)
             display_name = nickname if nickname else full_name
@@ -419,13 +435,13 @@ class BronzeToSilverTransformer:
                 row[0],  # person_id
                 first_name,  # first_name
                 last_name,  # last_name
-                middle_names if middle_names else None,  # middle_names
-                nickname if nickname else None,  # nickname
+                middle_names or '—',  # middle_names
+                nickname or '—',  # nickname
                 full_name,  # full_name
                 display_name,  # display_name
-                row[5],  # national_language_code
-                row[6],  # culture_code
-                row[7],  # gender
+                row[5] if row[5] is not None else 1033,  # national_language_code
+                row[6] if row[6] is not None else 1033,  # culture_code
+                (row[7] or 'Unspecified').strip()[:20],  # gender
                 True,  # is_valid
                 datetime.now(),  # valid_from
                 date(9999, 12, 31),  # valid_to
@@ -577,6 +593,7 @@ class BronzeToSilverTransformer:
             (person_key, location_key, sub_address, location_usage, location_usage_type,
              notes, is_primary, is_valid, valid_from, valid_to, _etl_timestamp)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (person_key, location_key) DO NOTHING
         """
         
         transformed = []
@@ -616,10 +633,10 @@ class BronzeToSilverTransformer:
             transformed.append((
                 person_key,  # person_key
                 location_key,  # location_key
-                row[2],  # sub_address
-                row[3],  # location_usage
+                (row[2] or '').strip() or '—',  # sub_address
+                (row[3] or '').strip() or usage_type,  # location_usage
                 usage_type,  # location_usage_type
-                row[4],  # notes
+                (row[4] or '').strip() or '—',  # notes
                 False,  # is_primary (default)
                 True,  # is_valid
                 datetime.now(),  # valid_from
@@ -690,10 +707,10 @@ class BronzeToSilverTransformer:
             person_key = person_map.get(row[1]) if row[1] else None  # persons_person_id -> person_key (optional)
             location_key = location_map.get(row[2]) if row[2] else None  # locations_location_id -> location_key (optional)
             
-            # Build full phone number
-            country_code = row[4] or ''
-            phone_num = row[3] or ''
-            full_phone = f"{country_code} {phone_num}".strip() if country_code or phone_num else None
+            # Build full phone number (non-empty for reporting)
+            country_code = (row[4] or '+1').strip()[:5]
+            phone_num = (row[3] or '0000000000').strip()[:20]
+            full_phone = f"{country_code} {phone_num}".strip()
             
             # Determine phone type
             phone_type_id = row[5]
@@ -833,9 +850,9 @@ class BronzeToSilverTransformer:
             transformed.append((
                 row[0],  # customer_employee_id
                 company_key,  # company_key
-                row[2],  # badge_number
-                row[3],  # job_title
-                row[4],  # department
+                (row[2] or '').strip() or f'BADGE-{row[0]:06d}',  # badge_number
+                (row[3] or '').strip() or 'Representative',  # job_title
+                (row[4] or '').strip() or 'General',  # department
                 row[5] or 0.0,  # credit_limit
                 (row[6] or 'USD')[:3],  # credit_limit_currency
                 True,  # is_valid
@@ -1413,7 +1430,7 @@ class BronzeToSilverTransformer:
                 row[0],  # customer_id
                 person_key,  # person_key
                 customer_employee_key,  # customer_employee_key
-                row[3],  # account_manager_id
+                row[3] if row[3] is not None else 0,  # account_manager_id
                 income_level,  # income_level
                 income_bracket,  # income_bracket
                 customer_type,  # customer_type
@@ -1619,17 +1636,19 @@ class BronzeToSilverTransformer:
             order_date = row[3] or datetime.now().date()
             order_status = status  # Already handled with default 'PENDING'
             
+            oc = (row[4] or '').strip() or f'ORD-{row[0]:010d}'
+            promo = (row[8] or '').strip() or ''
             transformed.append((
                 row[0],  # order_id
                 customer_key,  # customer_key
                 sales_rep_key,  # sales_rep_key
                 order_date,  # order_date (NOT NULL - use current date if missing)
-                row[4],  # order_code
+                oc[:20],  # order_code
                 order_status,  # order_status (NOT NULL - already has default 'PENDING')
                 status_category,  # order_status_category
                 row[6] or 0.0,  # order_total
                 (row[7] or 'USD')[:3],  # order_currency
-                row[8],  # promotion_code
+                promo,  # promotion_code (empty string if none)
                 True,  # is_valid
                 datetime.now()  # _etl_timestamp
             ))

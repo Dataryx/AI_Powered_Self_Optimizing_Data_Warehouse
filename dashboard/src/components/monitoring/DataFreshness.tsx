@@ -393,3 +393,4 @@ export default function DataFreshness({ data, loading, onRefetch }: DataFreshnes
     </div>
   );
 }
+

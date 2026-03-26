@@ -3,9 +3,9 @@
 -- PostgreSQL Version (Converted from SQL Server)
 -- ============================================================================
 -- This script creates a complete data warehouse with:
---   - Bronze Layer: Raw data from source systems (1:1 copy)
---   - Silver Layer: Cleaned, validated, and standardized data
---   - Gold Layer: Business-level aggregates (Star Schema for Analytics)
+--   - Bronze Layer: Landing / source-aligned tables (PK/FK + lineage columns)
+--   - Silver Layer: Cleaned, conformed warehouse (surrogate keys + FKs)
+--   - Gold Layer: Star schema dimensions, facts, and aggregates (PK/FK)
 -- ============================================================================
 
 -- ============================================================================
@@ -20,11 +20,11 @@ CREATE SCHEMA IF NOT EXISTS gold;
 -- ============================================================================
 -- BRONZE LAYER - Raw Source Data (Staging Area)
 -- ============================================================================
--- Purpose: Store raw data exactly as received from source systems
+-- Purpose: Store raw data as received from source systems (staging / landing)
 -- Characteristics:
---   - No transformations applied
---   - Includes metadata columns for auditing
---   - Preserves data types from source
+--   - Primary keys on natural business keys (dedup / integrity)
+--   - Foreign keys mirror source relationships where defined
+--   - _source_system, _load_timestamp, _batch_id on every table (lineage last)
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -32,20 +32,22 @@ CREATE SCHEMA IF NOT EXISTS gold;
 -- ----------------------------------------------------------------------------
 
 CREATE TABLE bronze.country (
-    country_id INT,
-    country_name VARCHAR(50),
+    country_id INT NOT NULL,
+    country_name VARCHAR(50) NOT NULL,
     country_code VARCHAR(3),
     nat_lang_code INT,
     currency_code VARCHAR(10),
-    -- Metadata columns
+    -- Source lineage (every load)
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_country PRIMARY KEY (country_id)
 );
 
 CREATE TABLE bronze.location (
-    location_id INT,
+    location_id INT NOT NULL,
     country_id INT,
+    countries_country_id INT,
     address_line_1 VARCHAR(100),
     address_line_2 VARCHAR(100),
     city VARCHAR(50),
@@ -55,21 +57,26 @@ CREATE TABLE bronze.location (
     location_type_code INT,
     description VARCHAR(256),
     shipping_notes VARCHAR(512),
-    countries_country_id INT,
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_location PRIMARY KEY (location_id),
+    CONSTRAINT fk_bronze_location_country FOREIGN KEY (country_id)
+        REFERENCES bronze.country (country_id),
+    CONSTRAINT fk_bronze_location_country_legacy FOREIGN KEY (countries_country_id)
+        REFERENCES bronze.country (country_id)
 );
 
 CREATE TABLE bronze.warehouse (
-    warehouse_id INT,
+    warehouse_id INT NOT NULL,
     location_id INT,
     warehouse_name VARCHAR(100),
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_warehouse PRIMARY KEY (warehouse_id),
+    CONSTRAINT fk_bronze_warehouse_location FOREIGN KEY (location_id)
+        REFERENCES bronze.location (location_id)
 );
 
 -- ----------------------------------------------------------------------------
@@ -77,7 +84,7 @@ CREATE TABLE bronze.warehouse (
 -- ----------------------------------------------------------------------------
 
 CREATE TABLE bronze.product (
-    product_id INT,
+    product_id INT NOT NULL,
     product_name VARCHAR(100),
     description TEXT,
     category INT,
@@ -89,22 +96,26 @@ CREATE TABLE bronze.product (
     minimum_price DECIMAL(12,2),
     price_currency VARCHAR(5),
     catalog_url VARCHAR(256),
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_product PRIMARY KEY (product_id)
 );
 
 CREATE TABLE bronze.inventory (
-    inventory_id INT,
-    product_id INT,
-    warehouse_id INT,
+    inventory_id INT NOT NULL,
+    product_id INT NOT NULL,
+    warehouse_id INT NOT NULL,
     quantity_on_hand INT,
     quantity_available INT,
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_inventory PRIMARY KEY (inventory_id),
+    CONSTRAINT fk_bronze_inventory_product FOREIGN KEY (product_id)
+        REFERENCES bronze.product (product_id),
+    CONSTRAINT fk_bronze_inventory_warehouse FOREIGN KEY (warehouse_id)
+        REFERENCES bronze.warehouse (warehouse_id)
 );
 
 -- ----------------------------------------------------------------------------
@@ -112,7 +123,7 @@ CREATE TABLE bronze.inventory (
 -- ----------------------------------------------------------------------------
 
 CREATE TABLE bronze.person (
-    person_id INT,
+    person_id INT NOT NULL,
     first_name VARCHAR(50),
     last_name VARCHAR(50),
     middle_names VARCHAR(100),
@@ -120,49 +131,59 @@ CREATE TABLE bronze.person (
     nat_lang_code INT,
     culture_code INT,
     gender VARCHAR(20),
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_person PRIMARY KEY (person_id)
 );
 
 CREATE TABLE bronze.restricted_info (
-    person_id INT,
+    person_id INT NOT NULL,
     date_of_birth DATE,
     date_of_death DATE,
     government_id VARCHAR(50),
     passport_id VARCHAR(50),
     hire_date DATE,
     seniority_code INT,
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_restricted_info PRIMARY KEY (person_id),
+    CONSTRAINT fk_bronze_restricted_info_person FOREIGN KEY (person_id)
+        REFERENCES bronze.person (person_id)
 );
 
 CREATE TABLE bronze.person_location (
-    persons_person_id INT,
-    locations_location_id INT,
+    persons_person_id INT NOT NULL,
+    locations_location_id INT NOT NULL,
     sub_address VARCHAR(100),
     location_usage VARCHAR(50),
     notes TEXT,
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_person_location PRIMARY KEY (persons_person_id, locations_location_id),
+    CONSTRAINT fk_bronze_person_location_person FOREIGN KEY (persons_person_id)
+        REFERENCES bronze.person (person_id),
+    CONSTRAINT fk_bronze_person_location_location FOREIGN KEY (locations_location_id)
+        REFERENCES bronze.location (location_id)
 );
 
 CREATE TABLE bronze.phone_number (
-    phone_number_id INT,
+    phone_number_id INT NOT NULL,
     persons_person_id INT,
     locations_location_id INT,
     phone_number VARCHAR(20),
     country_code VARCHAR(5),
     phone_type_id INT,
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_phone_number PRIMARY KEY (phone_number_id),
+    CONSTRAINT fk_bronze_phone_person FOREIGN KEY (persons_person_id)
+        REFERENCES bronze.person (person_id),
+    CONSTRAINT fk_bronze_phone_location FOREIGN KEY (locations_location_id)
+        REFERENCES bronze.location (location_id)
 );
 
 -- ----------------------------------------------------------------------------
@@ -170,40 +191,46 @@ CREATE TABLE bronze.phone_number (
 -- ----------------------------------------------------------------------------
 
 CREATE TABLE bronze.customer_company (
-    company_id INT,
+    company_id INT NOT NULL,
     company_name VARCHAR(100),
     company_credit_limit DECIMAL(15,2),
     credit_limit_currency VARCHAR(5),
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_customer_company PRIMARY KEY (company_id)
 );
 
 CREATE TABLE bronze.customer_employee (
-    customer_employee_id INT,
+    customer_employee_id INT NOT NULL,
     company_id INT,
     badge_number VARCHAR(30),
     job_title VARCHAR(100),
     department VARCHAR(100),
     credit_limit DECIMAL(12,2),
     credit_limit_currency VARCHAR(5),
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_customer_employee PRIMARY KEY (customer_employee_id),
+    CONSTRAINT fk_bronze_customer_employee_company FOREIGN KEY (company_id)
+        REFERENCES bronze.customer_company (company_id)
 );
 
 CREATE TABLE bronze.customer (
-    customer_id INT,
+    customer_id INT NOT NULL,
     person_id INT,
     customer_employee_id INT,
     accountmgr_id INT,
     income_level INT,
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_customer PRIMARY KEY (customer_id),
+    CONSTRAINT fk_bronze_customer_person FOREIGN KEY (person_id)
+        REFERENCES bronze.person (person_id),
+    CONSTRAINT fk_bronze_customer_employee FOREIGN KEY (customer_employee_id)
+        REFERENCES bronze.customer_employee (customer_employee_id)
 );
 
 -- ----------------------------------------------------------------------------
@@ -211,19 +238,21 @@ CREATE TABLE bronze.customer (
 -- ----------------------------------------------------------------------------
 
 CREATE TABLE bronze.employment_jobs (
-    hr_job_id INT,
+    hr_job_id INT NOT NULL,
     countries_country_id INT,
     job_title VARCHAR(100),
     min_salary DECIMAL(12,2),
     max_salary DECIMAL(12,2),
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_employment_jobs PRIMARY KEY (hr_job_id),
+    CONSTRAINT fk_bronze_employment_jobs_country FOREIGN KEY (countries_country_id)
+        REFERENCES bronze.country (country_id)
 );
 
 CREATE TABLE bronze.employment (
-    employee_id INT,
+    employee_id INT NOT NULL,
     person_id INT,
     hr_job_id INT,
     manager_employee_id INT,
@@ -232,10 +261,17 @@ CREATE TABLE bronze.employment (
     salary DECIMAL(12,2),
     commission_percent DECIMAL(5,2),
     employment_status VARCHAR(20),
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_employment PRIMARY KEY (employee_id),
+    CONSTRAINT fk_bronze_employment_person FOREIGN KEY (person_id)
+        REFERENCES bronze.person (person_id),
+    CONSTRAINT fk_bronze_employment_job FOREIGN KEY (hr_job_id)
+        REFERENCES bronze.employment_jobs (hr_job_id),
+    CONSTRAINT fk_bronze_employment_manager FOREIGN KEY (manager_employee_id)
+        REFERENCES bronze.employment (employee_id)
+        DEFERRABLE INITIALLY DEFERRED
 );
 
 -- ----------------------------------------------------------------------------
@@ -243,7 +279,7 @@ CREATE TABLE bronze.employment (
 -- ----------------------------------------------------------------------------
 
 CREATE TABLE bronze.orders (
-    order_id INT,
+    order_id INT NOT NULL,
     customer_id INT,
     sales_rep_id INT,
     order_date DATE,
@@ -252,22 +288,30 @@ CREATE TABLE bronze.orders (
     order_total DECIMAL(15,2),
     order_currency VARCHAR(5),
     promotion_code VARCHAR(50),
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_orders PRIMARY KEY (order_id),
+    CONSTRAINT fk_bronze_orders_customer FOREIGN KEY (customer_id)
+        REFERENCES bronze.customer (customer_id),
+    CONSTRAINT fk_bronze_orders_sales_rep FOREIGN KEY (sales_rep_id)
+        REFERENCES bronze.employment (employee_id)
 );
 
 CREATE TABLE bronze.order_item (
-    order_item_id INT,
-    order_id INT,
-    product_id INT,
+    order_item_id INT NOT NULL,
+    order_id INT NOT NULL,
+    product_id INT NOT NULL,
     unit_price DECIMAL(12,2),
     quantity DECIMAL(10,2),
-    -- Metadata columns
     _source_system VARCHAR(50) DEFAULT 'OLTP',
     _load_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    _batch_id INT
+    _batch_id INT,
+    CONSTRAINT pk_bronze_order_item PRIMARY KEY (order_item_id),
+    CONSTRAINT fk_bronze_order_item_order FOREIGN KEY (order_id)
+        REFERENCES bronze.orders (order_id),
+    CONSTRAINT fk_bronze_order_item_product FOREIGN KEY (product_id)
+        REFERENCES bronze.product (product_id)
 );
 
 -- ============================================================================
@@ -563,6 +607,7 @@ CREATE TABLE silver.employee (
     CONSTRAINT fk_silver_employee_person FOREIGN KEY (person_key) REFERENCES silver.person(person_key),
     CONSTRAINT fk_silver_employee_job FOREIGN KEY (job_key) REFERENCES silver.employment_jobs(job_key),
     CONSTRAINT fk_silver_employee_manager FOREIGN KEY (manager_employee_key) REFERENCES silver.employee(employee_key)
+        DEFERRABLE INITIALLY DEFERRED
 );
 
 -- ----------------------------------------------------------------------------
@@ -808,7 +853,8 @@ CREATE TABLE gold.dim_warehouse (
     -- SCD Type 2 columns
     is_current BOOLEAN DEFAULT TRUE,
     effective_date DATE,
-    expiration_date DATE DEFAULT '9999-12-31'
+    expiration_date DATE DEFAULT '9999-12-31',
+    CONSTRAINT fk_dim_warehouse_location FOREIGN KEY (location_key) REFERENCES gold.dim_location(location_key)
 );
 
 -- Promotion Dimension
@@ -857,7 +903,8 @@ CREATE TABLE gold.fact_sales (
     CONSTRAINT fk_fact_sales_date FOREIGN KEY (order_date_key) REFERENCES gold.dim_date(date_key),
     CONSTRAINT fk_fact_sales_customer FOREIGN KEY (customer_key) REFERENCES gold.dim_customer(customer_key),
     CONSTRAINT fk_fact_sales_product FOREIGN KEY (product_key) REFERENCES gold.dim_product(product_key),
-    CONSTRAINT fk_fact_sales_employee FOREIGN KEY (employee_key) REFERENCES gold.dim_employee(employee_key)
+    CONSTRAINT fk_fact_sales_employee FOREIGN KEY (employee_key) REFERENCES gold.dim_employee(employee_key),
+    CONSTRAINT fk_fact_sales_promotion FOREIGN KEY (promotion_key) REFERENCES gold.dim_promotion(promotion_key)
 );
 
 -- Inventory Snapshot Fact Table (Periodic snapshot - daily inventory levels)
@@ -909,7 +956,8 @@ CREATE TABLE gold.fact_orders (
     -- Foreign keys
     CONSTRAINT fk_fact_orders_date FOREIGN KEY (order_date_key) REFERENCES gold.dim_date(date_key),
     CONSTRAINT fk_fact_orders_customer FOREIGN KEY (customer_key) REFERENCES gold.dim_customer(customer_key),
-    CONSTRAINT fk_fact_orders_employee FOREIGN KEY (employee_key) REFERENCES gold.dim_employee(employee_key)
+    CONSTRAINT fk_fact_orders_employee FOREIGN KEY (employee_key) REFERENCES gold.dim_employee(employee_key),
+    CONSTRAINT fk_fact_orders_promotion FOREIGN KEY (promotion_key) REFERENCES gold.dim_promotion(promotion_key)
 );
 
 -- ----------------------------------------------------------------------------
@@ -931,7 +979,8 @@ CREATE TABLE gold.agg_daily_sales (
     -- Comparisons (for easy trending)
     prev_day_net_revenue DECIMAL(18,2),
     revenue_change_pct DECIMAL(8,2),
-    CONSTRAINT fk_agg_daily_date FOREIGN KEY (date_key) REFERENCES gold.dim_date(date_key)
+    CONSTRAINT fk_agg_daily_date FOREIGN KEY (date_key) REFERENCES gold.dim_date(date_key),
+    CONSTRAINT uk_agg_daily_sales_date UNIQUE (date_key)
 );
 
 -- Monthly Sales by Product Category
@@ -947,7 +996,8 @@ CREATE TABLE gold.agg_monthly_product_sales (
     net_revenue DECIMAL(18,2),
     avg_unit_price DECIMAL(12,2),
     -- Rankings
-    category_rank INT
+    category_rank INT,
+    CONSTRAINT uk_agg_monthly_product_period UNIQUE (year_number, month_number, category_name)
 );
 
 -- Customer Lifetime Value Summary
@@ -990,7 +1040,8 @@ CREATE TABLE gold.agg_sales_rep_performance (
     quota_attainment_pct DECIMAL(8,2),
     -- Rankings
     sales_rank INT,
-    CONSTRAINT fk_agg_perf_employee FOREIGN KEY (employee_key) REFERENCES gold.dim_employee(employee_key)
+    CONSTRAINT fk_agg_perf_employee FOREIGN KEY (employee_key) REFERENCES gold.dim_employee(employee_key),
+    CONSTRAINT uk_agg_sales_rep_perf_period UNIQUE (employee_key, year_number, month_number)
 );
 
 -- Create indexes for Gold Layer
