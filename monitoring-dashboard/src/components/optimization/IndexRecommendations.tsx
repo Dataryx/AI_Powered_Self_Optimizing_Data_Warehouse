@@ -3,7 +3,7 @@
  * ML-generated optimization suggestions - Advisory only, no apply buttons
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React from 'react';
 import {
   Card,
   CardContent,
@@ -13,7 +13,6 @@ import {
   Paper,
 } from '@mui/material';
 import { Storage, TrendingUp, CheckCircle } from '@mui/icons-material';
-import { apiService } from '../../services/api';
 
 interface Recommendation {
   recommendation_id: string;
@@ -35,14 +34,18 @@ interface Recommendation {
 }
 
 interface IndexRecommendationsProps {
-  refreshKey?: number;
+  /** From API / shared optimization hook (parent owns one WebSocket). */
+  recommendations: Recommendation[] | null;
+  error: string | null;
+  loading: boolean;
 }
 
 export const IndexRecommendations: React.FC<IndexRecommendationsProps> = ({
-  refreshKey = 0,
+  recommendations: recs,
+  error,
+  loading,
 }) => {
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const recommendations: Recommendation[] = (recs ?? []) as Recommendation[];
 
   const buildImpact = (rec: Recommendation) => {
     // Prefer explicit API-provided impact, otherwise use safe heuristic defaults (UI-only)
@@ -87,24 +90,6 @@ export const IndexRecommendations: React.FC<IndexRecommendationsProps> = ({
 
     return `Why: ${trigger} • Window: ${windowLabel}` as const;
   };
-
-  const fetchRecommendations = useCallback(async () => {
-    try {
-      const data = await apiService.getOptimizationRecommendations('index', 'pending');
-      setRecommendations(data.recommendations || data.data?.recommendations || []);
-      setLoading(false);
-    } catch (err) {
-      console.error('Error fetching index recommendations:', err);
-      setRecommendations([]);
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchRecommendations();
-    const interval = setInterval(fetchRecommendations, 30000);
-    return () => clearInterval(interval);
-  }, [fetchRecommendations, refreshKey]);
 
   const getSeverityColor = (priority?: string) => {
     switch (priority?.toLowerCase()) {
@@ -164,6 +149,12 @@ export const IndexRecommendations: React.FC<IndexRecommendationsProps> = ({
           </Box>
         </Box>
 
+        {error && (
+          <Typography variant="caption" sx={{ color: '#b91c1c', display: 'block', mb: 2 }}>
+            {error}
+          </Typography>
+        )}
+
         {loading ? (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Typography variant="body2" sx={{ color: '#64748b' }}>
@@ -188,12 +179,12 @@ export const IndexRecommendations: React.FC<IndexRecommendationsProps> = ({
           </Box>
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {recommendations.map((rec) => {
+            {recommendations.map((rec, idx) => {
               const severity = getSeverityColor(rec.priority);
               const impact = buildImpact(rec);
               return (
                 <Paper
-                  key={rec.recommendation_id}
+                  key={`${rec.recommendation_id}-${idx}`}
                   elevation={0}
                   sx={{
                     p: 2,

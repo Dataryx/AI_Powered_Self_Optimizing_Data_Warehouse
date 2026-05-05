@@ -3,6 +3,7 @@ Workload Clustering Model
 Clusters queries by workload characteristics using unsupervised learning.
 """
 
+import json
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans, DBSCAN
@@ -10,7 +11,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import joblib
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from pathlib import Path
 
 from ml_optimization.config.model_config import WorkloadClusteringConfig
@@ -33,6 +34,8 @@ class WorkloadClusterer:
         self.scaler = StandardScaler()
         self.pca = None
         self.cluster_profiles = {}
+        self._dbscan_centroids: Dict[int, np.ndarray] = {}
+        self._fit_X_scaled: Optional[np.ndarray] = None
         self.feature_names = [
             'execution_time_normalized',
             'row_count_log',
@@ -40,7 +43,53 @@ class WorkloadClusterer:
             'join_complexity',
             'filter_selectivity',
         ]
-    
+
+    @staticmethod
+    def feature_matrix_from_query_logs_df(df: pd.DataFrame) -> np.ndarray:
+        """
+        Build (n, 5) raw feature rows aligned with training scripts:
+        mean_exec_time_ms, estimated_rows, table_count, join_count, filter_predicate_count
+        (from ``extracted_features`` JSON when present).
+        """
+        rows: List[List[float]] = []
+        for _, row in df.iterrows():
+            extracted: Any = row.get("extracted_features", {}) or {}
+            if isinstance(extracted, str):
+                try:
+                    extracted = json.loads(extracted)
+                except json.JSONDecodeError:
+                    extracted = {}
+            if not isinstance(extracted, dict):
+                extracted = {}
+            rows.append(
+                [
+                    float(row.get("mean_exec_time_ms", 0) or 0),
+                    float(extracted.get("estimated_rows", 0) or 0),
+                    float(extracted.get("table_count", 0) or 0),
+                    float(extracted.get("join_count", 0) or 0),
+                    float(extracted.get("filter_predicate_count", 0) or 0),
+                ]
+            )
+        return np.asarray(rows, dtype=np.float64)
+
+    def fit_from_query_logs(self, df: pd.DataFrame) -> bool:
+        """Fit on ``ml_optimization.query_logs``-shaped DataFrame (same as train_model.py)."""
+        X = self.feature_matrix_from_query_logs_df(df)
+        if X.shape[0] < self.config.min_samples:
+            logger.warning(
+                "Insufficient samples for clustering: %s < %s",
+                X.shape[0],
+                self.config.min_samples,
+            )
+            return False
+        self.fit(X)
+        return self.model is not None
+
+    def predict_from_query_logs(self, df: pd.DataFrame) -> np.ndarray:
+        """Assign cluster ids to each query log row (same feature construction as training)."""
+        X = self.feature_matrix_from_query_logs_df(df)
+        return self.predict(X)
+
     def prepare_features(self, queries: pd.DataFrame) -> np.ndarray:
         """
         Prepare features for clustering.
@@ -124,9 +173,24 @@ class WorkloadClusterer:
             raise ValueError(f"Unsupported algorithm: {self.config.algorithm}")
         
         self.model.fit(features_scaled)
-        
-        logger.info(f"Fitted {self.config.algorithm} model with {len(set(self.model.labels_))} clusters")
-        
+        self._fit_X_scaled = features_scaled
+
+        self._dbscan_centroids = {}
+        if self.config.algorithm == "dbscan" and hasattr(self.model, "labels_"):
+            for lab in set(self.model.labels_):
+                if lab == -1:
+                    continue
+                mask = self.model.labels_ == lab
+                if np.any(mask):
+                    self._dbscan_centroids[int(lab)] = np.mean(features_scaled[mask], axis=0)
+
+        n_lab = (
+            len(set(self.model.labels_))
+            if hasattr(self.model, "labels_")
+            else getattr(self.model, "n_clusters", 0)
+        )
+        logger.info("Fitted %s model (%s cluster labels)", self.config.algorithm, n_lab)
+
         return self
     
     def predict(self, query_features: np.ndarray) -> np.ndarray:
@@ -150,14 +214,32 @@ class WorkloadClusterer:
             features_scaled = self.pca.transform(features_scaled)
         
         # Predict clusters
-        if self.config.algorithm == 'kmeans':
+        if self.config.algorithm == "kmeans":
             labels = self.model.predict(features_scaled)
-        elif self.config.algorithm == 'dbscan':
-            labels = self.model.fit_predict(features_scaled)  # DBSCAN doesn't have predict
+        elif self.config.algorithm == "dbscan":
+            labels = self._predict_dbscan_assign(features_scaled)
         else:
             raise ValueError(f"Unsupported algorithm: {self.config.algorithm}")
-        
+
         return labels
+
+    def _predict_dbscan_assign(self, features_scaled: np.ndarray) -> np.ndarray:
+        """Assign points to nearest DBSCAN cluster centroid (trained centroids only)."""
+        if not self._dbscan_centroids:
+            return np.full(features_scaled.shape[0], -1, dtype=int)
+        out = np.empty(features_scaled.shape[0], dtype=int)
+        eps = float(self.config.eps)
+        for i in range(features_scaled.shape[0]):
+            v = features_scaled[i]
+            best_lab = -1
+            best_d = float("inf")
+            for lab, c in self._dbscan_centroids.items():
+                d = float(np.linalg.norm(v - c))
+                if d < best_d:
+                    best_d = d
+                    best_lab = lab
+            out[i] = best_lab if best_d <= eps else -1
+        return out
     
     def get_cluster_profiles(self, queries: pd.DataFrame, labels: np.ndarray) -> Dict:
         """
@@ -171,23 +253,33 @@ class WorkloadClusterer:
             Dictionary with cluster profiles
         """
         queries_with_labels = queries.copy()
-        queries_with_labels['cluster'] = labels
-        
+        queries_with_labels["cluster"] = labels
+
+        for col, default in [
+            ("mean_exec_time_ms", 0.0),
+            ("table_count", 0.0),
+            ("join_count", 0.0),
+            ("has_aggregation", 0.0),
+            ("has_window_function", 0.0),
+        ]:
+            if col not in queries_with_labels.columns:
+                queries_with_labels[col] = default
+
         profiles = {}
-        
+
         for cluster_id in set(labels):
             if cluster_id == -1:  # Noise cluster (DBSCAN)
                 continue
-            
-            cluster_queries = queries_with_labels[queries_with_labels['cluster'] == cluster_id]
-            
+
+            cluster_queries = queries_with_labels[queries_with_labels["cluster"] == cluster_id]
+
             profiles[cluster_id] = {
-                'size': len(cluster_queries),
-                'avg_execution_time_ms': float(cluster_queries['mean_exec_time_ms'].mean()),
-                'avg_table_count': float(cluster_queries['table_count'].mean()),
-                'avg_join_count': float(cluster_queries['join_count'].mean()),
-                'has_aggregation_ratio': float(cluster_queries['has_aggregation'].mean()),
-                'has_window_function_ratio': float(cluster_queries['has_window_function'].mean()),
+                "size": len(cluster_queries),
+                "avg_execution_time_ms": float(cluster_queries["mean_exec_time_ms"].mean() or 0),
+                "avg_table_count": float(cluster_queries["table_count"].mean() or 0),
+                "avg_join_count": float(cluster_queries["join_count"].mean() or 0),
+                "has_aggregation_ratio": float(cluster_queries["has_aggregation"].mean() or 0),
+                "has_window_function_ratio": float(cluster_queries["has_window_function"].mean() or 0),
             }
         
         self.cluster_profiles = profiles
@@ -196,25 +288,27 @@ class WorkloadClusterer:
     def save_model(self, filepath: str):
         """Save trained model to file."""
         model_data = {
-            'model': self.model,
-            'scaler': self.scaler,
-            'pca': self.pca,
-            'config': self.config,
-            'cluster_profiles': self.cluster_profiles,
-            'feature_names': self.feature_names,
+            "model": self.model,
+            "scaler": self.scaler,
+            "pca": self.pca,
+            "config": self.config,
+            "cluster_profiles": self.cluster_profiles,
+            "feature_names": self.feature_names,
+            "dbscan_centroids": self._dbscan_centroids,
         }
         joblib.dump(model_data, filepath)
         logger.info(f"Saved model to {filepath}")
-    
+
     def load_model(self, filepath: str):
         """Load trained model from file."""
         model_data = joblib.load(filepath)
-        self.model = model_data['model']
-        self.scaler = model_data['scaler']
-        self.pca = model_data.get('pca')
-        self.config = model_data.get('config', WorkloadClusteringConfig())
-        self.cluster_profiles = model_data.get('cluster_profiles', {})
-        self.feature_names = model_data.get('feature_names', self.feature_names)
+        self.model = model_data["model"]
+        self.scaler = model_data["scaler"]
+        self.pca = model_data.get("pca")
+        self.config = model_data.get("config", WorkloadClusteringConfig())
+        self.cluster_profiles = model_data.get("cluster_profiles", {})
+        self.feature_names = model_data.get("feature_names", self.feature_names)
+        self._dbscan_centroids = model_data.get("dbscan_centroids") or {}
         logger.info(f"Loaded model from {filepath}")
 
 

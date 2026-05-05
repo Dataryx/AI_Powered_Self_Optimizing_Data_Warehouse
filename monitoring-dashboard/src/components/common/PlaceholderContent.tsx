@@ -2,7 +2,7 @@
  * Placeholder Content Component
  * Displays placeholder content when API is unavailable
  * Note: This component is now primarily for loading states.
- * For offline mode, components should use mockDataService instead.
+ * For offline mode, show empty or loading states — do not substitute fabricated metrics.
  */
 
 import React from 'react';

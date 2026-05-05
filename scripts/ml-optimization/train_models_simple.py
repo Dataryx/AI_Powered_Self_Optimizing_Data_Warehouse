@@ -11,11 +11,14 @@ import numpy as np
 import os
 from pathlib import Path
 import json
+import warnings
 
 # Add paths
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "ml-optimization"))
+
+warnings.filterwarnings("ignore", category=UserWarning, module=r"sklearn\.utils\.parallel")
 
 # Configure logging
 logging.basicConfig(

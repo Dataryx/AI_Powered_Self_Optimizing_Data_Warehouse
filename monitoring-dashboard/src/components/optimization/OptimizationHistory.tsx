@@ -3,7 +3,7 @@
  * Timeline-style history of applied optimizations - Designed for auditability
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React from 'react';
 import {
   Card,
   CardContent,
@@ -14,7 +14,6 @@ import {
   Divider,
 } from '@mui/material';
 import { History, CheckCircle, Person } from '@mui/icons-material';
-import { apiService } from '../../services/api';
 
 interface HistoryItem {
   recommendation_id: string;
@@ -32,32 +31,17 @@ interface HistoryItem {
 }
 
 interface OptimizationHistoryProps {
-  refreshKey?: number;
+  history: HistoryItem[] | null;
+  error: string | null;
+  loading: boolean;
 }
 
 export const OptimizationHistory: React.FC<OptimizationHistoryProps> = ({
-  refreshKey = 0,
+  history,
+  error,
+  loading,
 }) => {
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchHistory = useCallback(async () => {
-    try {
-      const data = await apiService.getOptimizationHistory(100);
-      setHistory(data.history || data.data?.history || []);
-      setLoading(false);
-    } catch (err) {
-      console.error('Error fetching optimization history:', err);
-      setHistory([]);
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchHistory();
-    const interval = setInterval(fetchHistory, 30000);
-    return () => clearInterval(interval);
-  }, [fetchHistory, refreshKey]);
+  const historyItems: HistoryItem[] = (history ?? []) as HistoryItem[];
 
   const getTypeColor = (type: string) => {
     switch (type?.toLowerCase()) {
@@ -155,9 +139,9 @@ export const OptimizationHistory: React.FC<OptimizationHistoryProps> = ({
               Applied optimizations timeline
             </Typography>
           </Box>
-          {history.length > 0 && (
+          {historyItems.length > 0 && (
             <Chip
-              label={history.length}
+              label={historyItems.length}
               size="small"
               sx={{
                 backgroundColor: '#f1f5f9',
@@ -170,13 +154,19 @@ export const OptimizationHistory: React.FC<OptimizationHistoryProps> = ({
           )}
         </Box>
 
+        {error && (
+          <Typography variant="caption" sx={{ color: '#b91c1c', display: 'block', mb: 2 }}>
+            {error}
+          </Typography>
+        )}
+
         {loading ? (
           <Box sx={{ textAlign: 'center', py: 6 }}>
             <Typography variant="body2" sx={{ color: '#64748b' }}>
               Loading optimization history...
             </Typography>
           </Box>
-        ) : history.length === 0 ? (
+        ) : historyItems.length === 0 ? (
           <Box sx={{ textAlign: 'center', py: 6 }}>
             <History sx={{ fontSize: 40, color: '#94a3b8', mb: 1.5 }} />
             <Typography
@@ -188,7 +178,7 @@ export const OptimizationHistory: React.FC<OptimizationHistoryProps> = ({
           </Box>
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {history.map((item, index) => {
+            {historyItems.map((item, index) => {
               const typeColors = getTypeColor(item.type);
               const severityColors = getSeverityColor(item.severity || item.priority);
               const target = item.schema ? `${item.schema}.${item.table}` : item.table;
@@ -336,7 +326,7 @@ export const OptimizationHistory: React.FC<OptimizationHistoryProps> = ({
                       )}
                     </Box>
                   </Paper>
-                  {index < history.length - 1 && <Divider sx={{ borderColor: '#e2e8f0' }} />}
+                  {index < historyItems.length - 1 && <Divider sx={{ borderColor: '#e2e8f0' }} />}
                 </React.Fragment>
               );
             })}

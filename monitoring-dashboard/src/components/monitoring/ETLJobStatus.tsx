@@ -7,7 +7,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, Typography, Box, Chip, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
 import { CheckCircle, Error as ErrorIcon, Refresh, Schedule, TrendingUp, TrendingDown, Warning } from '@mui/icons-material';
-import { apiService } from '../../services/api';
+import { apiService, mlApiWebSocketUrl } from '../../services/api';
 import { useThemeColors } from '../../theme/useThemeColors';
 
 interface ETLJob {
@@ -50,8 +50,7 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
 
   // WebSocket connection for real-time updates with HTTP fallback
   useEffect(() => {
-    const wsHost = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000';
-    const wsUrl = `${wsHost}/api/v1/ws/etl-jobs`;
+    const wsUrl = mlApiWebSocketUrl('ws/etl-jobs');
     
     let ws: WebSocket | null = null;
     let reconnectTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -240,20 +239,8 @@ export const ETLJobStatus: React.FC<ETLJobStatusProps> = ({ refreshKey = 0 }) =>
     return null;
   };
 
-  const getBaselineDelta = (duration: number | null, jobName?: string) => {
-    if (!duration) return null;
-    // Mock baseline - in real implementation, fetch from API
-    // For sample data, use specific percentages
-    if (jobName === 'Silver Transformation') {
-      return { delta: 1, percentage: 35 }; // +35%
-    }
-    if (jobName === 'Gold Aggregation') {
-      return { delta: -1, percentage: -5 }; // -5%
-    }
-    // Default baseline calculation
-    const baseline = 120; // 120 seconds baseline
-    const delta = duration - baseline;
-    return { delta, percentage: Math.round((delta / baseline) * 100) };
+  const getBaselineDelta = (_duration: number | null, _jobName?: string) => {
+    return null;
   };
 
   const formatDuration = (seconds: number | null) => {

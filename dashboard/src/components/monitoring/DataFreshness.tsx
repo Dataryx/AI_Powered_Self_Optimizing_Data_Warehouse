@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, RefreshCw, Database, Clock, FileText, Layers, XCircle, HelpCircle, X } from 'lucide-react';
 import { formatLocalDateTime } from '../../utils/time';
@@ -55,7 +55,12 @@ function sortBySeverity(datasets: Array<{ status?: string; [k: string]: unknown 
   return [...datasets].sort((a, b) => (order[a?.status as keyof typeof order] ?? 2) - (order[b?.status as keyof typeof order] ?? 2));
 }
 
-function formatLastUpdatedLine(ds: { last_updated_at?: unknown; last_updated?: unknown; lastUpdated?: unknown }) {
+function formatLastUpdatedLine(ds: {
+  last_updated_at?: unknown;
+  last_updated?: unknown;
+  lastUpdated?: unknown;
+  last_updated_iso?: unknown;
+}) {
   const iso = ds.last_updated_at ?? ds.last_updated_iso;
   if (typeof iso === 'string' && iso.length > 4 && iso !== '—') {
     return formatLocalDateTime(iso);
@@ -72,38 +77,6 @@ function signalSummary(ds: Record<string, unknown>): string {
   if (s === 'pg_stat') return 'Clock source: pg_stat_user_tables (analyze / vacuum)';
   if (s === 'unknown') return 'Clock source: none — age unknown';
   return 'Clock source: —';
-}
-
-function buildSlaDetailLinesFallback(ds: Record<string, unknown>, freshMaxH: number, staleMaxH: number): string[] {
-  const status = (ds?.status as string) ?? 'unknown';
-  const ha = typeof ds?.hours_ago === 'number' ? ds.hours_ago : null;
-  const lines: string[] = [];
-  lines.push(
-    'Activity time uses the newest signal from: completed ETL (monitoring.job_runs), MAX() on common timestamp columns, or PostgreSQL pg_stat_user_tables (analyze/vacuum).'
-  );
-  lines.push(
-    `Freshness bands: Up to date = activity newer than ${freshMaxH}h · Needs review = between ${freshMaxH}h and ${staleMaxH}h · Update overdue = ${staleMaxH}h or older · Unknown = no reliable timestamp.`
-  );
-  if (status === 'unknown') {
-    lines.push('This dataset is Unknown: we could not infer when data or the table was last touched.');
-    lines.push('Row counts may still come from COUNT(*) or n_live_tup when the table is readable.');
-    return lines;
-  }
-  if (ha != null) {
-    lines.push(`Computed age: ${ha.toFixed(2)} hours since last detected activity.`);
-    if (status === 'fresh') {
-      lines.push(`Because ${ha.toFixed(2)}h is under ${freshMaxH}h, this is classified as Up to date.`);
-    } else if (status === 'stale') {
-      lines.push(
-        `Because age is at least ${freshMaxH}h but under ${staleMaxH}h, this is Needs review (monitor closely).`
-      );
-    } else {
-      lines.push(`Because ${ha.toFixed(2)}h is ${staleMaxH}h or more, this is Update overdue for this policy.`);
-    }
-  } else {
-    lines.push('Hours-since value missing in payload; status follows server rules.');
-  }
-  return lines;
 }
 
 export default function DataFreshness({ data, loading, onRefetch }: DataFreshnessProps) {

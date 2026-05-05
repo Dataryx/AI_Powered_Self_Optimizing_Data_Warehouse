@@ -15,7 +15,6 @@ function buildTiers(data: DashboardData | null): typeof DEFAULT_TIERS {
   const bronze = ws.bronze ?? { table_count: 16, estimated_rows: 52571979 };
   const silver = ws.silver ?? { table_count: 16, estimated_rows: 99757794 };
   const gold = ws.gold ?? { table_count: 14, estimated_rows: 72832037 };
-  const total = bronze.estimated_rows + silver.estimated_rows + gold.estimated_rows;
 
   return [
     { name: 'Bronze', icon: Layers, tables: bronze.table_count, rows: bronze.estimated_rows.toLocaleString(), rowsNum: bronze.estimated_rows, desc: 'Raw ingestion layer', color: '#e07a3a', elevation: '1,200m' },

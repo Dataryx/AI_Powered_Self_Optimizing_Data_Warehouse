@@ -12,7 +12,7 @@ import { useStorageData } from '../hooks/useStorageData';
 import { formatLocalTime } from '../utils/time';
 
 export default function StoragePage() {
-  const { data, loading, error, refetch } = useStorageData();
+  const { data, loading, error, refetch, growthTrendDays, setGrowthTrendDays } = useStorageData();
   const [time, setTime] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(t); }, []);
 
@@ -52,7 +52,13 @@ export default function StoragePage() {
 
           {/* Data Growth Trends */}
           <div className="mt-6">
-            <DataGrowthTrends data={data} loading={loading} onRefetch={refetch} />
+            <DataGrowthTrends
+              data={data}
+              loading={loading}
+              onRefetch={refetch}
+              growthTrendDays={growthTrendDays}
+              onGrowthTrendDaysChange={setGrowthTrendDays}
+            />
           </div>
 
           {/* Compression + Cache Performance */}

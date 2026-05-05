@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import MobileMenuButton from '../MobileMenuButton';
 import { formatLocalTime } from '../../utils/time';
 
-export default function MonitoringHeader() {
+export default function MonitoringHeader({ refreshing = false }: { refreshing?: boolean }) {
   const navigate = useNavigate();
   const [time, setTime] = useState(new Date());
   useEffect(() => {
@@ -35,6 +35,9 @@ export default function MonitoringHeader() {
           <Radio size={10} className="text-[#34d399] animate-pulse" />
           <span className="font-mono text-[9px] text-[#34d399] font-bold tracking-widest uppercase">Live</span>
         </div>
+        {refreshing && (
+          <span className="font-mono text-[10px] text-[#8a9aaa] tabular-nums animate-pulse">Syncing…</span>
+        )}
         <span className="font-mono text-xs text-[#5a6a8a] tabular-nums">
           {formatLocalTime(time)}
         </span>

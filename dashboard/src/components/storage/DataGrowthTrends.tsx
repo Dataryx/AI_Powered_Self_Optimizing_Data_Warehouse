@@ -1,9 +1,13 @@
-import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { TrendingUp, RefreshCw } from 'lucide-react';
 import { formatLocalTime } from '../../utils/time';
+import type { GrowthTrendDays } from '../../hooks/useStorageData';
 
-const ranges = ['7d', '30d', '90d'];
+const ranges: { key: string; days: GrowthTrendDays }[] = [
+  { key: '7d', days: 7 },
+  { key: '30d', days: 30 },
+  { key: '90d', days: 90 },
+];
 
 function getTrendSeries(data: any): { dates: string[]; bronze: number[]; silver: number[]; gold: number[]; maxVal: number; periodDays?: number } {
   const growth = data?.growth;
@@ -41,10 +45,21 @@ function buildAreaPath(values: number[], maxVal: number, w: number, h: number, p
   return `M${points[0]} ${points.slice(1).map(p => `L${p}`).join(' ')} L${lastX},${h - pad} L${pad},${h - pad} Z`;
 }
 
-interface DataGrowthTrendsProps { data?: any; loading?: boolean; onRefetch?: () => void }
+interface DataGrowthTrendsProps {
+  data?: any;
+  loading?: boolean;
+  onRefetch?: () => void;
+  growthTrendDays: GrowthTrendDays;
+  onGrowthTrendDaysChange: (days: GrowthTrendDays) => void;
+}
 
-export default function DataGrowthTrends({ data, loading, onRefetch }: DataGrowthTrendsProps) {
-  const [activeRange, setActiveRange] = useState('30d');
+export default function DataGrowthTrends({
+  data,
+  loading,
+  onRefetch,
+  growthTrendDays,
+  onGrowthTrendDaysChange,
+}: DataGrowthTrendsProps) {
   const { dates, bronze, silver, gold, maxVal, periodDays } = getTrendSeries(data);
   const W = 900;
   const H = 280;
@@ -67,18 +82,18 @@ export default function DataGrowthTrends({ data, loading, onRefetch }: DataGrowt
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {ranges.map(r => (
+          {ranges.map((r) => (
             <button
-              key={r}
+              key={r.key}
               type="button"
-              onClick={() => setActiveRange(r)}
+              onClick={() => onGrowthTrendDaysChange(r.days)}
               className={`px-3 py-1 rounded-lg font-mono text-[10px] font-bold tracking-wider transition-all ${
-                activeRange === r
+                growthTrendDays === r.days
                   ? 'bg-topo-4 text-white'
                   : 'bg-base border border-contour text-ink-muted hover:text-ink'
               }`}
             >
-              {r}
+              {r.key}
             </button>
           ))}
           <button type="button" onClick={() => onRefetch?.()} className="w-7 h-7 rounded-lg bg-base border border-contour flex items-center justify-center text-ink-muted hover:text-ink transition-colors" aria-label="Refresh growth trends">

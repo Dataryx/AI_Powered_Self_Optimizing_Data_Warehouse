@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.get("/")
-async def get_metrics():
+def get_metrics():
     """Get performance metrics."""
     return {
         "message": "Metrics endpoint",
@@ -18,7 +18,7 @@ async def get_metrics():
 
 
 @router.get("/query-performance")
-async def get_query_performance():
+def get_query_performance():
     """Get query performance metrics."""
     return {
         "message": "Query performance metrics",

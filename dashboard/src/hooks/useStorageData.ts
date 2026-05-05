@@ -1,7 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
+import {
+  growthTrendDaysFromRetention,
+  loadMonitoringPreferences,
+} from '../settings/monitoringPreferences';
+import { useRetentionDays } from './useMonitoringPreferences';
+
+export type GrowthTrendDays = 7 | 30 | 90;
 
 export function useStorageData() {
+  const retentionDays = useRetentionDays();
+  const [growthTrendDays, setGrowthTrendDays] = useState<GrowthTrendDays>(() =>
+    growthTrendDaysFromRetention(loadMonitoringPreferences().retentionDays),
+  );
   const [data, setData] = useState<{
     utilization?: any;
     growth?: any;
@@ -13,13 +24,17 @@ export function useStorageData() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setGrowthTrendDays(growthTrendDaysFromRetention(retentionDays));
+  }, [retentionDays]);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [utilization, growth, compression, cache, resources, cost] = await Promise.allSettled([
         api.getStorageUtilization(),
-        api.getGrowthTrends(30),
+        api.getGrowthTrends(growthTrendDays),
         api.getCompressionStats(),
         api.getCachePerformance(),
         api.getResourceAllocation(),
@@ -38,14 +53,11 @@ export function useStorageData() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [growthTrendDays]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
-  return { data, loading, error, refetch: fetchAll };
+  useEffect(() => {
+    void fetchAll();
+  }, [fetchAll]);
+
+  return { data, loading, error, refetch: fetchAll, growthTrendDays, setGrowthTrendDays };
 }
-
-
-
-
-
-

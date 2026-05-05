@@ -8,7 +8,7 @@ import hashlib
 import json
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class CacheManager:
         try:
             cache_value = {
                 'result': result,
-                'cached_at': datetime.utcnow().isoformat(),
+                'cached_at': datetime.now(timezone.utc).isoformat(),
                 'ttl': ttl,
             }
             self.cache.setex(

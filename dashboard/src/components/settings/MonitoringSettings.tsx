@@ -1,6 +1,12 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Save, Gauge, Timer, Archive, BarChart2, BellRing } from 'lucide-react';
+import { Save, Gauge, Timer, Archive, BarChart2, BellRing, RotateCcw } from 'lucide-react';
+import {
+  MONITORING_FIELD_LABELS as L,
+  MONITORING_PREFERENCES_DEFAULTS as D,
+  applyMonitoringPreferencesFromRows,
+  notifyMonitoringPreferencesChanged,
+} from '../../settings/monitoringPreferences';
 
 interface MonField {
   label: string;
@@ -11,40 +17,49 @@ interface MonField {
   options?: string[];
   group: 'polling' | 'lifecycle';
   icon: typeof Timer;
+  min?: number;
+  max?: number;
 }
 
 const initialFields: MonField[] = [
   {
-    label: 'Dashboard refresh',
-    description: 'How often dashboard panels refetch data',
-    value: '30',
+    label: L.dashboard,
+    description: 'How often the home dashboard and Monitoring page refetch data from the API.',
+    value: String(D.dashboardRefreshSec),
     unit: 'sec',
     type: 'input',
     group: 'polling',
     icon: Timer,
+    min: 5,
+    max: 600,
   },
   {
-    label: 'Alert check interval',
-    description: 'How often to poll for new alert conditions',
-    value: '60',
+    label: L.alert,
+    description: 'How often the Alerts page refreshes its bundle in the background.',
+    value: String(D.alertPollSec),
     unit: 'sec',
     type: 'input',
     group: 'polling',
     icon: BellRing,
+    min: 10,
+    max: 3600,
   },
   {
-    label: 'Data retention',
-    description: 'Retention window for historical metrics in UI',
-    value: '90',
+    label: L.retention,
+    description:
+      'Analytics long query window, Optimizations default range, home sales chart default, and storage growth tab mapping.',
+    value: String(D.retentionDays),
     unit: 'days',
     type: 'input',
     group: 'lifecycle',
     icon: Archive,
+    min: 1,
+    max: 3650,
   },
   {
-    label: 'Metrics aggregation',
-    description: 'Rollup granularity for charts and summaries',
-    value: '1 hour',
+    label: L.aggregation,
+    description: 'Analytics workload chart: UTC run counts rolled up to this bucket width (hourly source → wider bins).',
+    value: D.metricsAggregation,
     unit: '',
     type: 'select',
     options: ['5 minutes', '15 minutes', '30 minutes', '1 hour', '6 hours', '24 hours'],
@@ -53,64 +68,22 @@ const initialFields: MonField[] = [
   },
 ];
 
-const STORAGE_KEY = 'dw-monitoring-settings';
-
 const GROUP_META: Record<MonField['group'], { title: string; blurb: string }> = {
-  polling: { title: 'Polling & checks', blurb: 'Controls how often the UI and alert logic wake up.' },
-  lifecycle: { title: 'Data lifecycle', blurb: 'How long data is considered relevant and how it is rolled up.' },
+  polling: {
+    title: 'Refresh cadence',
+    blurb: 'Lower values feel more live; higher values reduce API load.',
+  },
+  lifecycle: {
+    title: 'Windows & rollup',
+    blurb: 'How you think about history when exploring trends.',
+  },
 };
 
-const LEGACY_FIELD_ORDER = [
-  'Dashboard Refresh Interval',
-  'Data Retention',
-  'Metrics Aggregation Interval',
-  'Alert Check Interval',
-] as const;
-
-function migrateStoredFields(parsed: unknown): MonField[] {
-  if (!Array.isArray(parsed)) return initialFields;
-
-  const first = parsed[0] as { label?: string } | undefined;
-  const looksLegacy =
-    parsed.length === 4 && first?.label === LEGACY_FIELD_ORDER[0];
-
-  if (looksLegacy) {
-    const v = parsed as { value?: string }[];
-    const pick = (i: number, fallback: string) =>
-      typeof v[i]?.value === 'string' ? String(v[i].value) : fallback;
-    return [
-      { ...initialFields[0], value: pick(0, initialFields[0].value) },
-      { ...initialFields[1], value: pick(3, initialFields[1].value) },
-      { ...initialFields[2], value: pick(1, initialFields[2].value) },
-      { ...initialFields[3], value: pick(2, initialFields[3].value) },
-    ];
-  }
-
-  return initialFields.map((init) => {
-    const hit = parsed.find((p: { label?: string }) => p?.label === init.label);
-    if (hit && typeof hit === 'object' && 'value' in hit && typeof (hit as { value: string }).value === 'string') {
-      return { ...init, value: (hit as { value: string }).value };
-    }
-    const idx = initialFields.indexOf(init);
-    const byIndex = parsed[idx] as { value?: string } | undefined;
-    if (byIndex && typeof byIndex.value === 'string') {
-      return { ...init, value: byIndex.value };
-    }
-    return init;
-  });
-}
+const REFRESH_PRESETS = [15, 30, 60, 120] as const;
 
 export default function MonitoringSettings() {
-  const [fields, setFields] = useState<MonField[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return migrateStoredFields(JSON.parse(raw));
-    } catch (_) {
-      /* ignore */
-    }
-    return initialFields;
-  });
-  const [saved, setSaved] = useState(false);
+  const [fields, setFields] = useState<MonField[]>(() => initialFields);
+  const [saved, setSaved] = useState<'idle' | 'ok' | 'error'>('idle');
 
   const byGroup = useMemo(() => {
     const polling = fields.filter((f) => f.group === 'polling');
@@ -120,47 +93,79 @@ export default function MonitoringSettings() {
 
   const updateField = (idx: number, val: string) => {
     setFields((prev) => prev.map((f, i) => (i === idx ? { ...f, value: val } : f)));
-    setSaved(false);
+    setSaved('idle');
+  };
+
+  const applyDashboardPreset = (sec: number) => {
+    const idx = fields.findIndex((f) => f.label === L.dashboard);
+    if (idx >= 0) updateField(idx, String(sec));
+  };
+
+  const resetDefaults = () => {
+    setFields(initialFields);
+    setSaved('idle');
   };
 
   const handleSave = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(fields));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    applyMonitoringPreferencesFromRows(fields.map((f) => ({ label: f.label, value: f.value })));
+    notifyMonitoringPreferencesChanged();
+    setSaved('ok');
+    setTimeout(() => setSaved('idle'), 2500);
   };
 
   const renderField = (field: MonField, i: number, globalIdx: number) => {
     const Icon = field.icon;
+    const clampHint =
+      field.type === 'input' && field.min != null && field.max != null
+        ? `${field.min}–${field.max} ${field.unit}`
+        : null;
+
     return (
       <motion.div
         key={field.label}
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: i * 0.05 + 0.12 }}
-        className="rounded-xl border border-contour-strong bg-base/50 p-4 hover:border-topo-5/20 transition-colors"
+        transition={{ delay: i * 0.04 + 0.08 }}
+        className="rounded-lg border border-[#1e2540] bg-[#0a0e14] p-3 sm:p-4 hover:border-[#2a3555] transition-colors"
       >
-        <div className="flex items-start gap-3 mb-3">
-          <div className="w-9 h-9 rounded-lg bg-topo-5/10 border border-topo-5/20 flex items-center justify-center shrink-0">
-            <Icon size={16} className="text-topo-5" aria-hidden />
+        <div className="flex items-start gap-2.5 mb-2.5">
+          <div className="w-9 h-9 rounded-md bg-[#12182a] border border-[#2a3555] flex items-center justify-center shrink-0">
+            <Icon size={16} className="text-[#8a9aaa]" aria-hidden />
           </div>
           <div className="min-w-0 flex-1">
-            <span className="font-body text-sm font-semibold text-ink block">{field.label}</span>
-            {field.description ? (
-              <p className="font-mono text-[10px] text-ink-muted mt-0.5 leading-relaxed">{field.description}</p>
+            <span className="font-body text-sm font-semibold text-[#e0e8f5] block">{field.label}</span>
+            <p className="font-body text-xs text-[#8a9aaa] mt-1 leading-relaxed">{field.description}</p>
+            {clampHint ? (
+              <p className="font-mono text-[10px] text-[#5a6a8a] mt-1">Allowed: {clampHint}</p>
             ) : null}
           </div>
         </div>
+        {field.label === L.dashboard ? (
+          <div className="flex flex-wrap gap-1.5 mb-2.5">
+            {REFRESH_PRESETS.map((sec) => (
+              <button
+                key={sec}
+                type="button"
+                onClick={() => applyDashboardPreset(sec)}
+                className="px-2 py-1 rounded-md text-[10px] font-mono border border-[#2a3555] bg-[#0c0f1a] text-[#8a9aaa] hover:text-[#c0cde0] hover:border-[#3a4a62] transition-colors"
+              >
+                {sec}s
+              </button>
+            ))}
+          </div>
+        ) : null}
         {field.type === 'input' ? (
           <div className="relative">
             <input
               type="text"
               inputMode="numeric"
               value={field.value}
-              onChange={(e) => updateField(globalIdx, e.target.value)}
-              className="w-full bg-surface border border-contour-strong rounded-lg px-3 py-2.5 font-mono text-sm text-ink focus:outline-none focus:ring-2 focus:ring-topo-5/25 focus:border-topo-5/40 transition-all pr-14"
+              onChange={(e) => updateField(globalIdx, e.target.value.replace(/[^\d.]/g, ''))}
+              className="w-full bg-[#12182a] border border-[#2a3555] rounded-md px-3 py-2.5 font-mono text-sm text-[#c0cde0] focus:outline-none focus:border-[#3ecfff40] focus:ring-1 focus:ring-[#3ecfff25] transition-all pr-14"
+              aria-label={field.label}
             />
             {field.unit ? (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] text-ink-faint tracking-wider pointer-events-none">
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] text-[#5a6a8a] tracking-wider pointer-events-none">
                 {field.unit}
               </span>
             ) : null}
@@ -170,7 +175,8 @@ export default function MonitoringSettings() {
             <select
               value={field.value}
               onChange={(e) => updateField(globalIdx, e.target.value)}
-              className="w-full bg-surface border border-contour-strong rounded-lg px-3 py-2.5 font-mono text-sm text-ink focus:outline-none focus:ring-2 focus:ring-topo-5/25 focus:border-topo-5/40 transition-all appearance-none cursor-pointer pr-10"
+              className="w-full bg-[#12182a] border border-[#2a3555] rounded-md px-3 py-2.5 font-mono text-sm text-[#c0cde0] focus:outline-none focus:border-[#3ecfff40] focus:ring-1 focus:ring-[#3ecfff25] transition-all appearance-none cursor-pointer pr-10"
+              aria-label={field.label}
             >
               {field.options?.map((opt) => (
                 <option key={opt} value={opt}>
@@ -179,7 +185,7 @@ export default function MonitoringSettings() {
               ))}
             </select>
             <svg
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#5a6a8a] pointer-events-none"
               width="12"
               height="12"
               viewBox="0 0 12 12"
@@ -200,53 +206,53 @@ export default function MonitoringSettings() {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
+    <motion.section
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.15 }}
-      className="relative bg-surface rounded-2xl border border-contour-strong overflow-hidden h-fit"
+      transition={{ delay: 0.06 }}
+      className="rounded-lg border border-[#1e2540] bg-[#0c0f1a] overflow-hidden"
     >
-      <div
-        className="absolute top-0 left-0 right-0 h-[2px] opacity-80"
-        style={{
-          background: 'linear-gradient(90deg, transparent, rgba(62,207,255,0.7), rgba(129,140,248,0.5), transparent)',
-        }}
-      />
-      <div className="px-5 pt-5 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-start gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-topo-6/12 border border-topo-6/25 flex items-center justify-center shrink-0">
-            <Gauge size={18} className="text-topo-6" aria-hidden />
+      <div className="px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 border-b border-[#1e2540]">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <div className="w-9 h-9 rounded-md bg-[#3ecfff12] border border-[#3ecfff25] flex items-center justify-center shrink-0">
+            <Gauge size={18} className="text-[#3ecfff]" aria-hidden />
           </div>
           <div>
-            <h3 className="font-body text-lg font-bold text-ink tracking-tight">Monitoring</h3>
-            <p className="font-mono text-[10px] text-ink-faint tracking-wider mt-0.5 max-w-md">
-              Intervals and retention used by the dashboard (localStorage: {STORAGE_KEY})
+            <h2 className="font-body text-base font-semibold text-[#e0e8f5] tracking-tight">Monitoring &amp; polling</h2>
+            <p className="font-body text-xs text-[#8a9aaa] mt-1 max-w-xl leading-relaxed">
+              Applied for the current session only. Changes are not persisted in local browser storage.
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={handleSave}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-topo-5 text-white font-mono text-[11px] font-bold tracking-wider hover:bg-topo-5/90 transition-colors disabled:opacity-60 shrink-0 shadow-lg shadow-topo-5/15"
-          disabled={saved}
-        >
-          <Save size={13} />
-          {saved ? 'Saved' : 'Save changes'}
-        </button>
+        <div className="flex flex-wrap gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={resetDefaults}
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border border-[#2a3555] bg-[#12182a] text-[#c0cde0] hover:border-[#3a4a62] font-mono text-[11px] tracking-wide transition-colors"
+          >
+            <RotateCcw size={14} />
+            Reset
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border border-[#3ecfff35] bg-[#1a2235] text-[#e0e8f5] font-mono text-[11px] font-semibold tracking-wide hover:bg-[#243050] transition-colors"
+          >
+            <Save size={14} />
+            {saved === 'ok' ? 'Saved ✓' : saved === 'error' ? 'Failed' : 'Apply'}
+          </button>
+        </div>
       </div>
 
-      <div className="px-5 pb-5 space-y-8">
+      <div className="p-4 sm:p-5 space-y-6">
         {(['polling', 'lifecycle'] as const).map((groupKey) => {
           const list = byGroup[groupKey];
           const meta = GROUP_META[groupKey];
           return (
             <div key={groupKey}>
-              <div className="mb-3">
-                <h4 className="font-mono text-[10px] font-bold tracking-[0.22em] text-ink-muted uppercase">{meta.title}</h4>
-                <p className="font-body text-xs text-ink-faint mt-1">{meta.blurb}</p>
-                <div className="h-px bg-gradient-to-r from-contour-strong via-topo-5/20 to-transparent mt-3" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <h3 className="font-mono text-[10px] font-bold tracking-[0.18em] text-[#5a6a8a] uppercase">{meta.title}</h3>
+              <p className="font-body text-xs text-[#6b7a94] mt-1 mb-3">{meta.blurb}</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {list.map((field, i) => {
                   const globalIdx = fields.findIndex((f) => f.label === field.label);
                   return renderField(field, i, globalIdx >= 0 ? globalIdx : i);
@@ -256,6 +262,6 @@ export default function MonitoringSettings() {
           );
         })}
       </div>
-    </motion.div>
+    </motion.section>
   );
 }

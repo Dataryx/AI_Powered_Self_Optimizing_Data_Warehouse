@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { RefreshCw, DollarSign } from 'lucide-react';
+import { DollarSign } from 'lucide-react';
 
 function getCostFromApi(data: any): { layerCosts: { name: string; storage: string; monthly: string; yearly: string; color: string; dotColor: string }[]; totalMonthly: string } {
   const cost = data?.cost;

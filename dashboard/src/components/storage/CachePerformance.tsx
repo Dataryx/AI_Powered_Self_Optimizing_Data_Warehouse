@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw, Zap, AlertCircle } from 'lucide-react';
+import { Zap, AlertCircle } from 'lucide-react';
 
 const CACHE_PAGE_SIZE = 6;
 

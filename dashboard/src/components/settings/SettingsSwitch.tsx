@@ -25,10 +25,10 @@ export function SettingsSwitch({
       className={[
         'group relative flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full p-1',
         'transition-[background-color,box-shadow] duration-200 ease-out',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-topo-5/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecfff55] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0d18]',
         enabled
-          ? 'justify-end bg-topo-5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)]'
-          : 'justify-start bg-ink-faint/90 hover:bg-ink-faint',
+          ? 'justify-end bg-[#3ecfff] shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)]'
+          : 'justify-start bg-[#2a3555] hover:bg-[#3a4a62]',
         className ?? '',
       ].join(' ')}
     >

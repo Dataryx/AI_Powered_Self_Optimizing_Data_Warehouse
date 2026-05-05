@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { HardDrive, RefreshCw } from 'lucide-react';
+import { HardDrive } from 'lucide-react';
 import { formatLocalTime } from '../../utils/time';
 
 const LAYER_COLORS: Record<string, string> = { bronze: '#e07a3a', silver: '#3a7ed4', gold: '#7ab648' };
@@ -95,6 +95,11 @@ function PieChart({ segments }: { segments: { label: string; pct: number; color:
       ))}
     </svg>
   );
+}
+
+interface StorageUtilizationProps {
+  data?: any;
+  loading?: boolean;
 }
 
 export default function StorageUtilization({ data, loading }: StorageUtilizationProps) {

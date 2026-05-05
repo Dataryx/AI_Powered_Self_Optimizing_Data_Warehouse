@@ -6,10 +6,8 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Typography, Grid, CircularProgress, Alert, Paper, Card, CardContent } from '@mui/material';
 import { apiService } from '../services/api';
-import { mockDataService } from '../services/mockDataService';
 import { useApiStatus } from '../contexts/ApiStatusContext';
 import { PlaceholderContent } from '../components/common/PlaceholderContent';
-import { StatCard } from '../components/dashboard/StatCard';
 import { SalesChart } from '../components/dashboard/SalesChart';
 import { TopProductsChart } from '../components/dashboard/TopProductsChart';
 import { WarehouseOverview } from '../components/dashboard/WarehouseOverview';
@@ -41,61 +39,37 @@ export const DashboardPage: React.FC = () => {
           setLoading(true);
         }
         
-        let summary, sales, customers;
-        
-        if (isOnline) {
-          // Use real API when online
-          [summary, sales, customers] = await Promise.all([
-            apiService.getWarehouseSummary(),
-            apiService.getSalesStats(),
-            apiService.getCustomerStats(),
-          ]);
-        } else {
-          // Use mock data when offline
-          [summary, sales, customers] = await Promise.all([
-            mockDataService.getWarehouseSummary(),
-            mockDataService.getSalesStats(),
-            mockDataService.getCustomerStats(),
-          ]);
+        if (!isOnline) {
+          if (isMounted) {
+            setWarehouseSummary(null);
+            setSalesStats(null);
+            setCustomerStats(null);
+            setError(null);
+            setLoading(false);
+          }
+          return;
         }
-        
+
+        const [summary, sales, customers] = await Promise.all([
+          apiService.getWarehouseSummary(),
+          apiService.getSalesStats(),
+          apiService.getCustomerStats(),
+        ]);
+
         if (isMounted) {
           setWarehouseSummary(summary);
           setSalesStats(sales);
           setCustomerStats(customers);
           setError(null);
           setLoading(false);
-          
-          // Log data for debugging
-          if (sales?.top_products) {
-            console.log('Top Products Data:', sales.top_products);
-          }
         }
       } catch (err: any) {
         if (isMounted) {
-          // If API fails, try mock data as fallback
-          if (isOnline) {
-            try {
-              const [summary, sales, customers] = await Promise.all([
-                mockDataService.getWarehouseSummary(),
-                mockDataService.getSalesStats(),
-                mockDataService.getCustomerStats(),
-              ]);
-              if (isMounted) {
-                setWarehouseSummary(summary);
-                setSalesStats(sales);
-                setCustomerStats(customers);
-                setError('Using mock data - API unavailable');
-                setLoading(false);
-              }
-            } catch (mockErr) {
-              setError(err.message || 'Failed to load dashboard data');
-              setLoading(false);
-            }
-          } else {
-            setError(err.message || 'Failed to load dashboard data');
-            setLoading(false);
-          }
+          setWarehouseSummary(null);
+          setSalesStats(null);
+          setCustomerStats(null);
+          setError(err?.message || 'Failed to load dashboard data');
+          setLoading(false);
           console.error('Dashboard error:', err);
         }
       }
@@ -167,12 +141,12 @@ export const DashboardPage: React.FC = () => {
 
       {/* API Status Alert */}
       {!isOnline && !isChecking && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <strong>API Server Offline</strong> - Displaying mock data for demonstration. Please start the API server to view live data.
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <strong>API server offline</strong> — dashboard shows no warehouse data until the API is reachable.
         </Alert>
       )}
-      {error && error.includes('mock data') && (
-        <Alert severity="info" sx={{ mb: 2 }}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
           {error}
         </Alert>
       )}

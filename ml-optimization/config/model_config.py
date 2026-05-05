@@ -57,6 +57,10 @@ class CachePredictorConfig:
     random_state: int = 42
     cache_threshold: float = 0.7  # Probability threshold for caching
     ttl_default: int = 3600  # Default TTL in seconds
+    # Weak labels: high call volume + non-trivial latency → positive class (good cache candidate)
+    min_calls_sum_for_positive: int = 10
+    min_mean_exec_ms_for_positive: float = 100.0
+    min_training_groups: int = 20
 
 
 @dataclass

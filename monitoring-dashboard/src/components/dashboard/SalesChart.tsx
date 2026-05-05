@@ -28,31 +28,23 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
   // Handle empty or missing data and ensure proper sorting
   const safeData = data || [];
   
-  // Process and sort data by date
-  let chartData = safeData.length > 0 
-    ? safeData
-        .map((item) => ({
-          date: item.date,
-          dateObj: new Date(item.date),
-          sales: item.count || 0,
-          revenue: item.revenue || 0,
-        }))
-        .sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime())
-        .map((item) => ({
-          date: item.dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          sales: item.sales,
-          revenue: item.revenue,
-        }))
-    : // Generate placeholder data for last 30 days if no data
-      Array.from({ length: 30 }, (_, i) => {
-        const date = new Date();
-        date.setDate(date.getDate() - (29 - i));
-        return {
-          date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          sales: 0,
-          revenue: 0,
-        };
-      });
+  // Process and sort data by date (no synthetic filler when empty)
+  const chartData =
+    safeData.length > 0
+      ? safeData
+          .map((item) => ({
+            date: item.date,
+            dateObj: new Date(item.date),
+            sales: item.count || 0,
+            revenue: item.revenue || 0,
+          }))
+          .sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime())
+          .map((item) => ({
+            date: item.dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            sales: item.sales,
+            revenue: item.revenue,
+          }))
+      : [];
   
   // Calculate max values for better Y-axis scaling
   const maxSales = Math.max(...chartData.map(d => d.sales), 1);
@@ -97,6 +89,13 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
           </Box>
         </Box>
         <Box sx={{ width: '100%', height: 300, mt: 1 }}>
+          {chartData.length === 0 ? (
+            <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography variant="body2" color="text.secondary">
+                No sales data from the API yet
+              </Typography>
+            </Box>
+          ) : (
           <ResponsiveContainer>
             <AreaChart
               data={chartData}
@@ -232,6 +231,7 @@ export const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
               />
             </AreaChart>
           </ResponsiveContainer>
+          )}
         </Box>
       </CardContent>
     </Card>

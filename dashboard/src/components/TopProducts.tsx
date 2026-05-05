@@ -2,18 +2,28 @@ import { motion } from 'framer-motion';
 import { useMemo } from 'react';
 import type { DashboardData } from '../hooks/useDashboardData';
 
+function formatProductRevenue(rev: number): string {
+  if (!Number.isFinite(rev) || rev <= 0) return '$0';
+  if (rev >= 1_000_000) return `$${(rev / 1_000_000).toFixed(rev >= 10_000_000 ? 0 : 1)}M`;
+  if (rev >= 10_000) return `$${Math.round(rev / 1000)}k`;
+  if (rev >= 1000) return `$${(rev / 1000).toFixed(1)}k`;
+  return `$${rev.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
 function normalizeProducts(data: DashboardData | null): Array<{ rank: number; name: string; revenue: number }> {
   const raw = data?.sales?.top_products;
   if (!Array.isArray(raw) || raw.length === 0) return [];
-  const list = raw
-    .slice(0, 10)
+  const withRev = raw
     .map((p, i) => ({
-      rank: i + 1,
       name: (p.product ?? p.product_name ?? `Product ${i + 1}`) as string,
       revenue: typeof p.revenue === 'number' ? p.revenue : Number(p.revenue) || 0,
     }))
     .filter((p) => p.revenue > 0);
-  return list;
+  return withRev.slice(0, 10).map((p, idx) => ({
+    rank: idx + 1,
+    name: p.name,
+    revenue: p.revenue,
+  }));
 }
 
 const barColors = ['#f87171', '#f59e0b', '#fbbf24', '#34d399', '#3ecfff', '#818cf8', '#f87171', '#f59e0b', '#fbbf24', '#34d399'];
@@ -57,7 +67,9 @@ export default function TopProducts({ data = null, loading = false }: TopProduct
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-0.5">
                       <span className={`font-body text-xs font-medium truncate ${i === 0 ? 'text-[#f87171]' : 'text-[#c0cde0]'} group-hover:text-[#3ecfff] transition-colors`}>{p.name}</span>
-                      <span className="font-mono text-[10px] text-[#a0b0cc] font-bold ml-2 flex-shrink-0">${(p.revenue / 1000000).toFixed(1)}M</span>
+                      <span className="font-mono text-[10px] text-[#a0b0cc] font-bold ml-2 flex-shrink-0">
+                        {formatProductRevenue(p.revenue)}
+                      </span>
                     </div>
                     <div className="h-1.5 bg-[#0c0f1a] rounded-full overflow-hidden">
                       <motion.div initial={{ width: 0 }} animate={{ width: `${(p.revenue / maxRev) * 100}%` }} transition={{ delay: i * 0.04 + 0.4, duration: 0.6 }} className="h-full rounded-full" style={{ background: barColors[i % barColors.length], opacity: 0.6 }} />
@@ -69,7 +81,7 @@ export default function TopProducts({ data = null, loading = false }: TopProduct
           </div>
           <div className="px-5 py-3 border-t border-[#1e2540] flex items-center justify-between">
             <span className="font-mono text-[9px] text-[#3a4a6a] tracking-widest uppercase">Total</span>
-            <span className="font-body text-base font-bold text-white">${(totalRev / 1000000).toFixed(1)}M</span>
+            <span className="font-body text-base font-bold text-white">{formatProductRevenue(totalRev)}</span>
           </div>
         </>
       )}

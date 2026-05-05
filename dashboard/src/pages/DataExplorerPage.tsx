@@ -144,8 +144,7 @@ export default function DataExplorerPage() {
         ).filter(Boolean);
         const layerMap: Record<string, Layer> = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold' };
         const result: TableInfo[] = [];
-        for (const schema of schemaList) {
-          const schemaName = typeof schema === 'string' ? schema : (schema?.name ?? schema?.schema ?? String(schema));
+        for (const schemaName of schemaList) {
           const layer = layerMap[schemaName?.toLowerCase?.()] ?? 'Bronze';
           try {
             const tablesRes = await import('../services/api').then((m) => m.api.getTables(schemaName));

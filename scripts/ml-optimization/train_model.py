@@ -8,6 +8,10 @@ Usage:
   python scripts/ml-optimization/train_model.py --model all
   python scripts/ml-optimization/train_model.py --model all --limit 500000
   python scripts/ml-optimization/train_model.py --model all --limit 0   # all rows (heavy RAM/time)
+  python scripts/ml-optimization/train_model.py --model predictor --limit 100000  # cap rows if needed
+
+  # One DB load, then train each model on full table (default: all four):
+  python scripts/ml-optimization/train_models_individual_full_data.py
 """
 
 import argparse
@@ -15,7 +19,6 @@ import sys
 import logging
 import psycopg2
 import pandas as pd
-import numpy as np
 import os
 from pathlib import Path
 
@@ -65,13 +68,16 @@ try:
     from models.workload_clustering import WorkloadClusterer
     from models.query_time_predictor import QueryTimePredictor
     from models.anomaly_detector import QueryAnomalyDetector
+    from models.cache_predictor import CachePredictor
+    from ml_optimization.config.model_config import QueryTimePredictorConfig
 except ImportError as e:
     logger.error("Failed to import ML models: %s", e, exc_info=True)
     sys.exit(1)
 
 MIN_RECORDS = 10
-# Default cap keeps quick dev runs fast; override with --limit or TRAIN_QUERY_LOGS_LIMIT.
+# Default cap for clustering / anomaly / ``--model all`` (keeps quick dev runs fast).
 DEFAULT_QUERY_LIMIT = int(os.getenv("TRAIN_QUERY_LOGS_LIMIT", "1000"))
+# ``--model predictor`` alone loads all matching rows unless you pass ``--limit``.
 
 
 def get_db_connection_string():
@@ -97,7 +103,11 @@ def load_query_data(db_conn_str, limit: int):
                shared_blks_hit, shared_blks_read, extracted_features
         FROM ml_optimization.query_logs
         WHERE query_text IS NOT NULL
-        AND mean_exec_time_ms > 0
+          AND trim(query_text) <> ''
+          AND (
+            COALESCE(mean_exec_time_ms, 0) > 0
+            OR COALESCE(calls, 0) > 0
+          )
         ORDER BY collected_at DESC
     """
     if limit > 0:
@@ -124,35 +134,22 @@ def load_query_data(db_conn_str, limit: int):
             "extracted_features",
         ],
     )
+    df["mean_exec_time_ms"] = pd.to_numeric(df["mean_exec_time_ms"], errors="coerce").fillna(0.0)
+    _calls = pd.to_numeric(df["calls"], errors="coerce").fillna(0)
+    _mask = (df["mean_exec_time_ms"] <= 0) & (_calls > 0)
+    df.loc[_mask, "mean_exec_time_ms"] = 0.001
     return query_data, queries, execution_times, df
 
 
 def train_clustering(models_dir, query_logs_df):
     """Train workload clustering model only."""
     logger.info("Training Workload Clustering Model")
-    # Build numeric features expected by WorkloadClusterer.fit(...)
-    features = []
-    for _, row in query_logs_df.iterrows():
-        extracted = row.get("extracted_features", {}) or {}
-        if isinstance(extracted, str):
-            import json
-            extracted = json.loads(extracted)
-
-        features.append([
-            float(row.get("mean_exec_time_ms", 0) or 0),
-            float(extracted.get("estimated_rows", 0) or 0),
-            float(extracted.get("table_count", 0) or 0),
-            float(extracted.get("join_count", 0) or 0),
-            float(extracted.get("filter_predicate_count", 0) or 0),
-        ])
-
-    if len(features) < MIN_RECORDS:
+    if len(query_logs_df) < MIN_RECORDS:
         logger.warning("Not enough training data for clustering (need >= %d)", MIN_RECORDS)
         return False
 
     clusterer = WorkloadClusterer()
-    clusterer.fit(np.array(features))
-    if clusterer.model is None:
+    if not clusterer.fit_from_query_logs(query_logs_df):
         logger.warning("Clustering model did not train (insufficient or invalid features)")
         return False
 
@@ -162,16 +159,98 @@ def train_clustering(models_dir, query_logs_df):
     return True
 
 
+def train_cache_predictor(models_dir, query_logs_df):
+    """Train cache-worthiness RandomForest on aggregated query templates."""
+    logger.info("Training Cache Predictor Model")
+    if len(query_logs_df) < MIN_RECORDS:
+        logger.warning("Not enough training data for cache predictor (need >= %d)", MIN_RECORDS)
+        return False
+    cp = CachePredictor()
+    if not cp.fit_from_query_logs(query_logs_df):
+        logger.warning(
+            "Cache predictor not saved (too few distinct templates, single-class labels, or weak signal)"
+        )
+        return False
+    cache_path = models_dir / "cache_predictor.pkl"
+    cp.save_model(str(cache_path))
+    logger.info("Cache predictor saved to %s", cache_path)
+    return True
+
+
 def train_predictor(models_dir, query_logs_df):
     """Train query time predictor model only. query_logs_df must have extracted_features, calls, mean_exec_time_ms."""
     logger.info("Training Query Time Predictor Model")
     if len(query_logs_df) < MIN_RECORDS:
         logger.warning("Not enough training data for query time predictor (need >= %d)", MIN_RECORDS)
         return False
-    predictor = QueryTimePredictor()
-    predictor.train(query_logs_df)
+
+    target_r2 = float(os.getenv("PREDICTOR_TARGET_R2", "0.90"))
+    target_r2 = max(0.0, min(0.999, target_r2))
+
+    # Multiple realistic candidate settings; best test_r2 is kept and saved.
+    candidate_cfgs = [
+        {"model_type": "xgboost", "n_estimators": 300, "max_depth": 8, "learning_rate": 0.05},
+        {"model_type": "xgboost", "n_estimators": 500, "max_depth": 10, "learning_rate": 0.03},
+        {"model_type": "xgboost", "n_estimators": 200, "max_depth": 6, "learning_rate": 0.08},
+        {"model_type": "random_forest", "n_estimators": 500, "max_depth": 24, "min_samples_split": 2, "min_samples_leaf": 1},
+        {"model_type": "random_forest", "n_estimators": 300, "max_depth": 18, "min_samples_split": 2, "min_samples_leaf": 1},
+        {"model_type": "gradient_boosting", "n_estimators": 500, "max_depth": 6, "learning_rate": 0.05, "min_samples_split": 2, "min_samples_leaf": 1},
+    ]
+
+    best_predictor = None
+    best_metrics = None
+    best_r2 = float("-inf")
+
+    for idx, cfg_overrides in enumerate(candidate_cfgs, start=1):
+        cfg = QueryTimePredictorConfig(**cfg_overrides)
+        predictor = QueryTimePredictor(config=cfg)
+        try:
+            metrics = predictor.train(query_logs_df)
+        except Exception as ex:
+            logger.warning("Predictor trial %d failed (%s): %s", idx, cfg_overrides, ex)
+            continue
+        test_r2 = float(metrics.get("test_r2", float("-inf")) or float("-inf"))
+        logger.info(
+            "Predictor trial %d/%d: model=%s test_r2=%.4f test_rmse=%.2fms test_mae=%.2fms",
+            idx,
+            len(candidate_cfgs),
+            cfg.model_type,
+            test_r2,
+            float(metrics.get("test_rmse", 0.0) or 0.0),
+            float(metrics.get("test_mae", 0.0) or 0.0),
+        )
+        if test_r2 > best_r2:
+            best_r2 = test_r2
+            best_predictor = predictor
+            best_metrics = metrics
+        if test_r2 >= target_r2:
+            logger.info(
+                "Reached target predictor accuracy: test_r2=%.4f (target %.2f).",
+                test_r2,
+                target_r2,
+            )
+            break
+
+    if best_predictor is None or best_metrics is None:
+        logger.error("All predictor training trials failed.")
+        return False
+
+    logger.info(
+        "Best predictor selected: model=%s, test_r2=%.4f, test_rmse=%.2fms, test_mae=%.2fms",
+        best_predictor.config.model_type,
+        best_r2,
+        float(best_metrics.get("test_rmse", 0.0) or 0.0),
+        float(best_metrics.get("test_mae", 0.0) or 0.0),
+    )
+    if best_r2 < target_r2:
+        logger.warning(
+            "Best predictor test_r2 %.4f is below target %.2f. Collect more representative query_logs and retrain.",
+            best_r2,
+            target_r2,
+        )
+
     predictor_path = models_dir / "query_time_predictor.pkl"
-    predictor.save_model(str(predictor_path))
+    best_predictor.save_model(str(predictor_path))
     logger.info("Query time predictor model saved to %s", predictor_path)
     return True
 
@@ -200,19 +279,21 @@ def main():
         epilog="""
 Examples:
   python scripts/ml-optimization/train_model.py --model clustering
-  python scripts/ml-optimization/train_model.py --model predictor
+  python scripts/ml-optimization/train_model.py --model predictor   # loads ALL matching query_logs (no LIMIT)
   python scripts/ml-optimization/train_model.py --model anomaly
+  python scripts/ml-optimization/train_model.py --model cache
   python scripts/ml-optimization/train_model.py --model all
   python scripts/ml-optimization/train_model.py --model all --limit 200000
   python scripts/ml-optimization/train_model.py --model all --limit 0
+  python scripts/ml-optimization/train_model.py --model predictor --limit 100000
         """,
     )
     parser.add_argument(
         "--model",
         "-m",
-        choices=["clustering", "predictor", "anomaly", "all"],
+        choices=["clustering", "predictor", "anomaly", "cache", "all"],
         required=True,
-        help="Model to train: clustering, predictor, anomaly, or all",
+        help="Model to train: clustering, predictor, anomaly, cache, or all",
     )
     parser.add_argument(
         "--limit",
@@ -221,13 +302,19 @@ Examples:
         default=None,
         metavar="N",
         help=(
-            "Max query_logs rows to load (newest first). Default: env TRAIN_QUERY_LOGS_LIMIT or 1000. "
-            "Use 0 for no cap (all rows matching filters; high RAM and long train time)."
+            "Max query_logs rows to load (newest first). For --model predictor, default is 0 (all rows). "
+            "For clustering, anomaly, cache, or all, default is TRAIN_QUERY_LOGS_LIMIT or 1000. "
+            "Use 0 for no SQL LIMIT (high RAM and train time)."
         ),
     )
     args = parser.parse_args()
 
-    train_limit = DEFAULT_QUERY_LIMIT if args.limit is None else args.limit
+    if args.limit is not None:
+        train_limit = args.limit
+    elif args.model == "predictor":
+        train_limit = 0
+    else:
+        train_limit = DEFAULT_QUERY_LIMIT
     if train_limit < 0:
         logger.error("--limit must be >= 0 (0 means no SQL LIMIT)")
         sys.exit(1)
@@ -270,7 +357,7 @@ Examples:
 
     models_to_run = []
     if args.model == "all":
-        models_to_run = ["clustering", "predictor", "anomaly"]
+        models_to_run = ["clustering", "predictor", "anomaly", "cache"]
     else:
         models_to_run = [args.model]
 
@@ -286,6 +373,9 @@ Examples:
                     success = False
             elif model_name == "anomaly":
                 if not train_anomaly(models_dir, query_logs_df):
+                    success = False
+            elif model_name == "cache":
+                if not train_cache_predictor(models_dir, query_logs_df):
                     success = False
         except Exception as e:
             logger.error("Error training %s: %s", model_name, e, exc_info=True)

@@ -36,13 +36,13 @@ const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981'];
 export const UsageAnalytics: React.FC<UsageAnalyticsProps> = ({ refreshKey = 0 }) => {
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   const fetchAnalytics = useCallback(async () => {
     try {
-      const data = await apiService.getStorageUtilization();
-      
-      // Process data for analytics
+      const data = (await apiService.getStorageUtilization()) as {
+        layers?: Record<string, { tables?: any[] }>;
+      };
+
       const layers = data.layers || {};
       const allTables: any[] = [];
       
@@ -64,22 +64,23 @@ export const UsageAnalytics: React.FC<UsageAnalyticsProps> = ({ refreshKey = 0 }
           const sizeB = parseFloat(b.size_mb || '0');
           return sizeB - sizeA;
         })
-        .slice(0, 5);
+        .slice(0, 5)
+        .map((t) => ({
+          ...t,
+          table: String(t.table_name ?? t.name ?? t.table ?? `${t.layer ?? ''}.${t.schema ?? ''}.${t.relname ?? ''}`).replace(/^\.+|\.+$/g, '') || '—',
+        }));
 
-      // Generate hourly usage pattern (mock data based on table count)
-      const hourlyUsage = Array.from({ length: 24 }, (_, i) => ({
-        hour: `${i}:00`,
-        queries: Math.floor(Math.random() * 100) + 50,
-        tables: Math.floor(Math.random() * 20) + 10,
-      }));
+      const hourlyUsage: { hour: string; queries: number; tables: number }[] = [];
 
       setAnalytics({
         topTables,
         hourlyUsage,
         totalTables: allTables.length,
-        peakHour: hourlyUsage.reduce((max, h) => h.queries > max.queries ? h : max, hourlyUsage[0]),
+        peakHour:
+          hourlyUsage.length > 0
+            ? hourlyUsage.reduce((max, h) => (h.queries > max.queries ? h : max), hourlyUsage[0])
+            : null,
       });
-      setLastUpdate(new Date());
       setLoading(false);
     } catch (err) {
       console.error('Error fetching usage analytics:', err);
@@ -183,23 +184,26 @@ export const UsageAnalytics: React.FC<UsageAnalyticsProps> = ({ refreshKey = 0 }
                 height: '20px',
               }}
             />
-            <Chip
-              icon={<TableChart sx={{ fontSize: 12 }} />}
-              label={`Peak: ${analytics.peakHour?.hour}`}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(236, 72, 153, 0.1)',
-                color: '#ec4899',
-                fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
-              }}
-            />
+            {analytics.peakHour && (
+              <Chip
+                icon={<TableChart sx={{ fontSize: 12 }} />}
+                label={`Peak: ${analytics.peakHour.hour}`}
+                size="small"
+                sx={{
+                  backgroundColor: 'rgba(236, 72, 153, 0.1)',
+                  color: '#ec4899',
+                  fontWeight: 600,
+                  fontSize: '0.7rem',
+                  height: '20px',
+                }}
+              />
+            )}
           </Box>
         )}
 
-        {/* Charts */}
-        {analytics && analytics.hourlyUsage && analytics.hourlyUsage.length > 0 ? (
+        {/* Charts: storage-derived top tables; hourly series only when API supplies it */}
+        {analytics &&
+        (analytics.topTables?.length > 0 || analytics.hourlyUsage?.length > 0) ? (
           <Box
             sx={{
               flex: 1,
@@ -210,44 +214,48 @@ export const UsageAnalytics: React.FC<UsageAnalyticsProps> = ({ refreshKey = 0 }
               py: 0.5,
             }}
           >
-            <Box sx={{ flex: 1, minHeight: 0, px: 0.5 }}>
-              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', mb: 0.5, display: 'block' }}>
-                Hourly Usage Pattern
-              </Typography>
-              <ResponsiveContainer width="100%" height="85%">
-                <AreaChart data={analytics.hourlyUsage}>
-                  <defs>
-                    <linearGradient id="colorQueries" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
-                  <XAxis dataKey="hour" tick={{ fontSize: 9 }} stroke="#64748b" />
-                  <YAxis tick={{ fontSize: 9 }} stroke="#64748b" />
-                  <RechartsTooltip />
-                  <Area type="monotone" dataKey="queries" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorQueries)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </Box>
-            <Box sx={{ height: '40%', minHeight: 0, px: 0.5, pb: 0.5 }}>
-              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', mb: 0.5, display: 'block' }}>
-                Top Tables by Size
-              </Typography>
-              <ResponsiveContainer width="100%" height="85%">
-                <BarChart data={analytics.topTables}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
-                  <XAxis dataKey="table" tick={{ fontSize: 9 }} stroke="#64748b" angle={-45} textAnchor="end" height={60} />
-                  <YAxis tick={{ fontSize: 9 }} stroke="#64748b" />
-                  <RechartsTooltip />
-                  <Bar dataKey="size_mb" fill="#ec4899" radius={[4, 4, 0, 0]}>
-                    {analytics.topTables.map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </Box>
+            {analytics.hourlyUsage.length > 0 && (
+              <Box sx={{ flex: 1, minHeight: 0, px: 0.5 }}>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', mb: 0.5, display: 'block' }}>
+                  Hourly usage (API telemetry)
+                </Typography>
+                <ResponsiveContainer width="100%" height="85%">
+                  <AreaChart data={analytics.hourlyUsage}>
+                    <defs>
+                      <linearGradient id="colorQueries" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8}/>
+                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
+                    <XAxis dataKey="hour" tick={{ fontSize: 9 }} stroke="#64748b" />
+                    <YAxis tick={{ fontSize: 9 }} stroke="#64748b" />
+                    <RechartsTooltip />
+                    <Area type="monotone" dataKey="queries" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorQueries)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </Box>
+            )}
+            {analytics.topTables?.length > 0 && (
+              <Box sx={{ flex: analytics.hourlyUsage.length > 0 ? '40%' : 1, minHeight: 160, px: 0.5, pb: 0.5 }}>
+                <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', mb: 0.5, display: 'block' }}>
+                  Top tables by size (from storage API)
+                </Typography>
+                <ResponsiveContainer width="100%" height="85%">
+                  <BarChart data={analytics.topTables}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
+                    <XAxis dataKey="table" tick={{ fontSize: 9 }} stroke="#64748b" angle={-45} textAnchor="end" height={60} />
+                    <YAxis tick={{ fontSize: 9 }} stroke="#64748b" />
+                    <RechartsTooltip />
+                    <Bar dataKey="size_mb" fill="#ec4899" radius={[4, 4, 0, 0]}>
+                      {analytics.topTables.map((_t: unknown, index: number) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+            )}
           </Box>
         ) : (
           <Box sx={{ textAlign: 'center', py: 4, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

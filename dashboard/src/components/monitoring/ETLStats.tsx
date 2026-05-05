@@ -1,7 +1,16 @@
 import { motion } from 'framer-motion';
-import { Zap, XCircle, Clock, Brain, ShieldCheck } from 'lucide-react';
+import { Zap, XCircle, Clock, Brain, ShieldCheck, type LucideIcon } from 'lucide-react';
 
-const defaultStats = [
+type EtlStatRow = {
+  label: string;
+  value: string;
+  icon: LucideIcon;
+  color: string;
+  badge?: string;
+  sub?: string;
+};
+
+const defaultStats: EtlStatRow[] = [
   { label: 'Active Pipelines', value: '0', icon: Zap, color: '#3ecfff' },
   { label: 'Failed Runs (24h)', value: '0', icon: XCircle, color: '#f87171' },
   { label: 'Data Freshness SLA', value: '0/0', icon: ShieldCheck, color: '#34d399', badge: 'On time' },
@@ -9,7 +18,7 @@ const defaultStats = [
   { label: 'ML-Detected Anomalies', value: '0', icon: Brain, color: '#a78bfa' },
 ];
 
-function buildStats(data: any): typeof defaultStats {
+function buildStats(data: any): EtlStatRow[] {
   const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
   const active = jobs.filter((j: any) => j?.status === 'running' || j?.status === 'pending').length;
   const failed24h = Array.isArray(data?.errors) ? data.errors.length : 0;

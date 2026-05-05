@@ -1,13 +1,30 @@
 import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
 import { TableProperties, CheckCircle, Zap, RefreshCw, Loader2, DatabaseZap } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, formatOptimizationApplyError } from '../../services/api';
+import { recommendationApplySnapshot } from '../../utils/recommendationApplySnapshot';
 
 interface IndexRecommendationsProps { data?: any; loading?: boolean; onRefetch?: () => void }
+
+function recommendationSourceBadge(src: unknown): { label: string; className: string } | null {
+  if (typeof src !== 'string' || !src.trim()) return null;
+  const key = src.trim();
+  const map: Record<string, { label: string; className: string }> = {
+    ml_query_logs: { label: 'Live activity', className: 'bg-topo-4/15 text-topo-4' },
+    ml_pg_stat: { label: 'Live database', className: 'bg-violet-500/15 text-violet-300' },
+    ml_mixed: { label: 'Live blended', className: 'bg-cyan-500/12 text-cyan-300' },
+    persisted_db: { label: 'Saved record', className: 'bg-ink-faint/20 text-ink-muted' },
+    pg_stat_heuristic: { label: 'System insight', className: 'bg-amber-500/12 text-amber-300/90' },
+    workload_partition: { label: 'Live trend', className: 'bg-sky-500/12 text-sky-300' },
+  };
+  return map[key] ?? { label: key.replace(/_/g, ' '), className: 'bg-ink-faint/15 text-ink-faint' };
+}
 
 export default function IndexRecommendations({ data, loading, onRefetch }: IndexRecommendationsProps) {
   const [applyingId, setApplyingId] = useState<string | null>(null);
   const [applyFeedback, setApplyFeedback] = useState<{ id: string; ok: boolean; msg: string } | null>(null);
+  const [optimisticallyApplied, setOptimisticallyApplied] = useState<Record<string, true>>({});
+  const [alreadySatisfied, setAlreadySatisfied] = useState<Record<string, true>>({});
 
   useEffect(() => {
     if (!applyFeedback) return;
@@ -15,7 +32,6 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
     return () => clearTimeout(t);
   }, [applyFeedback]);
 
-  const isDemo = Boolean(data?.demoFlags?.indexRecommendations);
   const allRecs = Array.isArray(data?.recommendations) ? data.recommendations : [];
   const recs = allRecs.filter((r: any) => r?.type === 'index' || !r?.type);
 
@@ -25,14 +41,46 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
     setApplyingId(id);
     setApplyFeedback(null);
     try {
-      await api.applyOptimization(id, false);
-      setApplyFeedback({ id, ok: true, msg: 'Implementation recorded. Refresh list if status updates on the server.' });
+      const res = await api.applyOptimization(
+        id,
+        false,
+        recommendationApplySnapshot(rec as Record<string, unknown>),
+      );
+      if (res.outcome === 'already_satisfied') {
+        setAlreadySatisfied((prev) => ({ ...prev, [id]: true }));
+        setApplyFeedback({
+          id,
+          ok: true,
+          msg:
+            res.detail ||
+            'An index for this column already exists, so no new change was needed.',
+        });
+        onRefetch?.();
+        return;
+      }
+      if (res.persisted !== true) {
+        setApplyFeedback({
+          id,
+          ok: false,
+          msg:
+            'The action could not be confirmed on the server. Please check service connectivity and try again.',
+        });
+        return;
+      }
+      setOptimisticallyApplied((prev) => ({ ...prev, [id]: true }));
+      setApplyFeedback({
+        id,
+        ok: true,
+        msg: res.created_index_name
+          ? `Created index ${res.created_index_name}. See Optimization History for details.`
+          : 'Index created successfully. See Optimization History for details.',
+      });
       onRefetch?.();
     } catch (e) {
       setApplyFeedback({
         id,
         ok: false,
-        msg: e instanceof Error ? e.message : 'Could not reach optimization API.',
+        msg: formatOptimizationApplyError(e),
       });
     } finally {
       setApplyingId(null);
@@ -55,13 +103,7 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-body text-base font-bold text-ink">Index Recommendations</h3>
-              {isDemo && (
-                <span className="font-mono text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
-                  Sample
-                </span>
-              )}
             </div>
-            <p className="font-mono text-[10px] text-ink-faint tracking-wider">ML-generated optimization suggestions</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -89,6 +131,13 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
               const tableName = r?.table ?? r?.table_name ?? 'Table';
               const priority = (r?.priority ?? '').toLowerCase();
               const priorityColor = priority === 'high' ? 'bg-amber-500/20 text-amber-400' : priority === 'medium' ? 'bg-topo-4/20 text-topo-4' : 'bg-ink-faint/20 text-ink-muted';
+              const srcBadge = recommendationSourceBadge(r?.recommendation_source);
+              const rid = r?.recommendation_id as string | undefined;
+              const isApplied =
+                Boolean(rid && optimisticallyApplied[rid]) ||
+                String(r?.status ?? '').toLowerCase() === 'applied';
+              const isAlreadySatisfied = Boolean(rid && alreadySatisfied[rid]);
+              const implementDone = isApplied || isAlreadySatisfied;
               return (
                 <motion.div
                   key={r?.recommendation_id ?? i}
@@ -99,9 +148,19 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
                 >
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <span className="font-body text-sm font-semibold text-ink truncate">{tableName}</span>
-                    <span className={`shrink-0 px-2 py-0.5 rounded font-mono text-[9px] font-bold uppercase ${priorityColor}`}>
-                      {r?.priority ?? '—'}
-                    </span>
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                      {srcBadge ? (
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-mono text-[8px] font-bold uppercase tracking-wide ${srcBadge.className}`}
+                          title={`Source: ${r?.recommendation_source}`}
+                        >
+                          {srcBadge.label}
+                        </span>
+                      ) : null}
+                      <span className={`shrink-0 px-2 py-0.5 rounded font-mono text-[9px] font-bold uppercase ${priorityColor}`}>
+                        {r?.priority ?? '—'}
+                      </span>
+                    </div>
                   </div>
                   {(r?.reason || r?.query_count != null || r?.avg_execution_time_ms != null) && (
                     <p className="font-mono text-[11px] text-ink-faint mt-0.5">
@@ -126,24 +185,25 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
                   <div className="mt-3 pt-3 border-t border-contour/60 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <button
                       type="button"
-                      disabled={
-                        !r?.recommendation_id ||
-                        applyingId === r.recommendation_id ||
-                        String(r?.status ?? '').toLowerCase() === 'applied'
-                      }
+                      disabled={!rid || applyingId === rid || implementDone}
                       onClick={() => handleImplementIndex(r)}
                       className={`inline-flex items-center justify-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wide px-3 py-2 rounded-lg border transition-all disabled:pointer-events-none ${
-                        String(r?.status ?? '').toLowerCase() === 'applied'
+                        implementDone
                           ? 'bg-slate-800/60 text-teal-300/95 border-teal-500/35'
                           : 'bg-gradient-to-br from-teal-500 to-cyan-600 text-white border-teal-400/40 shadow-md shadow-teal-950/25 hover:from-teal-400 hover:to-cyan-500 hover:shadow-teal-900/30 disabled:opacity-45'
                       }`}
                     >
-                      {applyingId === r.recommendation_id ? (
+                      {applyingId === rid ? (
                         <>
                           <Loader2 size={14} className="animate-spin shrink-0 text-cyan-100" />
                           Applying…
                         </>
-                      ) : String(r?.status ?? '').toLowerCase() === 'applied' ? (
+                      ) : isAlreadySatisfied ? (
+                        <>
+                          <CheckCircle size={14} className="shrink-0 text-sky-400" />
+                          Already indexed
+                        </>
+                      ) : isApplied ? (
                         <>
                           <CheckCircle size={14} className="shrink-0 text-teal-400" />
                           Applied
@@ -155,7 +215,7 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
                         </>
                       )}
                     </button>
-                    {applyFeedback?.id === r.recommendation_id && (
+                    {applyFeedback && applyFeedback.id === rid && (
                       <p
                         className={`font-mono text-[10px] sm:text-right sm:max-w-[55%] ${applyFeedback.ok ? 'text-topo-4' : 'text-red-500 dark:text-red-400'}`}
                         role="status"
@@ -175,15 +235,11 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
               <CheckCircle size={26} className="text-topo-4" />
             </div>
             <span className="font-body text-sm font-medium text-ink">No index recommendations</span>
-            <span className="font-mono text-[11px] text-ink-faint mt-1">All tables are optimally indexed or no workload data yet</span>
+            <span className="font-mono text-[11px] text-ink-faint mt-1">Current workload signals do not indicate additional index actions.</span>
           </div>
         )}
       </div>
 
-      {/* Footer */}
-      <div className="px-5 py-3 border-t border-contour bg-base/30">
-        <span className="font-mono text-[10px] text-ink-faint">Recommendations are updated from query stats and post-execution performance.</span>
-      </div>
     </motion.div>
   );
 }

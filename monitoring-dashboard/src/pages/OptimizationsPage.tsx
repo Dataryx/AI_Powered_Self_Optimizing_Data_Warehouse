@@ -4,27 +4,37 @@
  * Design: Clean, minimal, professional - advisory-only, human-in-the-loop
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
-import {
-  Box,
-  Typography,
-  IconButton,
-  Chip,
-  Paper,
-  Divider,
-} from '@mui/material';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { Box, Typography, IconButton, Chip, Paper, Divider, Grid } from '@mui/material';
 import { Refresh, FiberManualRecord } from '@mui/icons-material';
 import { IndexRecommendations } from '../components/optimization/IndexRecommendations';
 import { PartitionRecommendations } from '../components/optimization/PartitionRecommendations';
 import { QueryPerformance } from '../components/optimization/QueryPerformance';
 import { OptimizationHistory } from '../components/optimization/OptimizationHistory';
 import { ApiStatusChecker } from '../components/common/ApiStatusChecker';
+import { useOptimizationRealtimeWebSocket } from '../hooks/useOptimizationRealtimeWebSocket';
+
+const REC_LIMIT = 100;
 
 export const OptimizationsPage: React.FC = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [isOnline, setIsOnline] = useState(true);
+  const [timeRange, setTimeRange] = useState('7');
+  const performanceDays = parseInt(timeRange, 10) || 7;
+
+  const opt = useOptimizationRealtimeWebSocket({
+    performanceDays,
+    performanceLimit: REC_LIMIT,
+    recommendationsLimit: REC_LIMIT,
+    historyLimit: REC_LIMIT,
+    wsIntervalMs: 2000,
+    fallbackIntervalMs: 2000,
+    refreshKey,
+  });
+
+  /** First HTTP/WS snapshot not yet applied (all panels share one payload). */
+  const dataLoading = opt.indexRecommendations === null && !opt.error;
 
   // Track online/offline status
   useEffect(() => {
@@ -41,7 +51,6 @@ export const OptimizationsPage: React.FC = () => {
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     setRefreshKey((prev) => prev + 1);
-    setLastUpdate(new Date());
     setTimeout(() => setIsRefreshing(false), 1000);
   }, []);
 
@@ -52,6 +61,30 @@ export const OptimizationsPage: React.FC = () => {
       second: '2-digit',
     });
   };
+
+  const displayUpdate = opt.lastUpdate ?? new Date();
+  const streamStatus = !isOnline
+    ? { label: 'Offline', color: '#ef4444', bg: '#ef444415', border: '#ef444440' }
+    : opt.wsConnected
+      ? { label: 'Live', color: '#10b981', bg: '#10b98115', border: '#10b98140' }
+      : opt.usingFallback
+        ? { label: 'Polling', color: '#d97706', bg: '#fef3c7', border: '#f59e0b40' }
+        : { label: 'Connecting…', color: '#6366f1', bg: '#e0e7ff', border: '#6366f140' };
+
+  const kpis = useMemo(() => {
+    const indexCount = Array.isArray(opt.indexRecommendations)
+      ? opt.indexRecommendations.length
+      : 0;
+    const partitionCount = Array.isArray(opt.partitionRecommendations)
+      ? opt.partitionRecommendations.length
+      : 0;
+    const totalRecs = indexCount + partitionCount;
+    const queryCount = Array.isArray(opt.performanceMetrics)
+      ? opt.performanceMetrics.length
+      : 0;
+    const historyCount = Array.isArray(opt.history) ? opt.history.length : 0;
+    return { indexCount, partitionCount, totalRecs, queryCount, historyCount };
+  }, [opt.indexRecommendations, opt.partitionRecommendations, opt.performanceMetrics, opt.history]);
 
   return (
     <Box
@@ -64,9 +97,9 @@ export const OptimizationsPage: React.FC = () => {
       {/* API Status Checker */}
       <ApiStatusChecker />
 
-      <Box sx={{ maxWidth: '1600px', mx: 'auto', p: 4 }}>
+      <Box sx={{ maxWidth: '1600px', mx: 'auto', p: 4, pt: 3 }}>
         {/* Page Header */}
-        <Box sx={{ mb: 4 }}>
+        <Box sx={{ mb: 3 }}>
           <Box
             sx={{
               display: 'flex',
@@ -119,8 +152,9 @@ export const OptimizationsPage: React.FC = () => {
                   <FiberManualRecord
                     sx={{
                       fontSize: '8px !important',
-                      color: isOnline ? '#10b981' : '#ef4444',
-                      animation: isOnline ? 'pulse 2s infinite' : 'none',
+                      color: streamStatus.color,
+                      animation:
+                        isOnline && opt.wsConnected ? 'pulse 2s infinite' : 'none',
                       '@keyframes pulse': {
                         '0%, 100%': { opacity: 1 },
                         '50%': { opacity: 0.5 },
@@ -128,22 +162,22 @@ export const OptimizationsPage: React.FC = () => {
                     }}
                   />
                 }
-                label={isOnline ? 'Live' : 'Offline'}
+                label={streamStatus.label}
                 size="small"
                 sx={{
-                  backgroundColor: isOnline ? '#10b98115' : '#ef444415',
-                  color: isOnline ? '#10b981' : '#ef4444',
+                  backgroundColor: streamStatus.bg,
+                  color: streamStatus.color,
                   fontWeight: 600,
                   fontSize: '0.75rem',
                   height: '24px',
-                  border: `1px solid ${isOnline ? '#10b98140' : '#ef444440'}`,
+                  border: `1px solid ${streamStatus.border}`,
                 }}
               />
               <Typography
                 variant="caption"
                 sx={{ color: '#64748b', fontSize: '0.75rem' }}
               >
-                Last updated: {formatTime(lastUpdate)}
+                Last updated: {formatTime(displayUpdate)}
               </Typography>
               <IconButton
                 onClick={handleRefresh}
@@ -170,6 +204,115 @@ export const OptimizationsPage: React.FC = () => {
           </Box>
         </Box>
 
+        {/* KPI strip */}
+        <Grid container spacing={2} sx={{ mb: 4 }}>
+          <Grid item xs={12} sm={4}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2.5,
+                borderRadius: 2,
+                border: '1px solid #e2e8f0',
+                background: '#ffffff',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 0.5,
+              }}
+            >
+              <Typography
+                variant="caption"
+                sx={{ color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}
+              >
+                Recommendations
+              </Typography>
+              <Typography
+                variant="h5"
+                sx={{
+                  fontWeight: 600,
+                  color: '#0f172a',
+                  fontSize: '1.5rem',
+                  lineHeight: 1.1,
+                }}
+              >
+                {kpis.totalRecs.toLocaleString()}
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                {kpis.indexCount} index · {kpis.partitionCount} partition
+              </Typography>
+            </Paper>
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2.5,
+                borderRadius: 2,
+                border: '1px solid #e2e8f0',
+                background: '#ffffff',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 0.5,
+              }}
+            >
+              <Typography
+                variant="caption"
+                sx={{ color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}
+              >
+                Active query shapes
+              </Typography>
+              <Typography
+                variant="h5"
+                sx={{
+                  fontWeight: 600,
+                  color: '#0f172a',
+                  fontSize: '1.5rem',
+                  lineHeight: 1.1,
+                }}
+              >
+                {kpis.queryCount.toLocaleString()}
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                Ranked by total execution time in selected window.
+              </Typography>
+            </Paper>
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2.5,
+                borderRadius: 2,
+                border: '1px solid #e2e8f0',
+                background: '#ffffff',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 0.5,
+              }}
+            >
+              <Typography
+                variant="caption"
+                sx={{ color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}
+              >
+                Optimization history
+              </Typography>
+              <Typography
+                variant="h5"
+                sx={{
+                  fontWeight: 600,
+                  color: '#0f172a',
+                  fontSize: '1.5rem',
+                  lineHeight: 1.1,
+                }}
+              >
+                {kpis.historyCount.toLocaleString()}
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                Entries recorded in the optimization catalog.
+              </Typography>
+            </Paper>
+          </Grid>
+        </Grid>
+
         {/* Section 1 & 2: Index and Partition Recommendations - Side by Side */}
         <Box sx={{ mb: 4 }}>
           <Box
@@ -179,19 +322,37 @@ export const OptimizationsPage: React.FC = () => {
               gap: 3,
             }}
           >
-            <IndexRecommendations refreshKey={refreshKey} />
-            <PartitionRecommendations refreshKey={refreshKey} />
+            <IndexRecommendations
+              recommendations={opt.indexRecommendations}
+              error={opt.error}
+              loading={dataLoading}
+            />
+            <PartitionRecommendations
+              recommendations={opt.partitionRecommendations}
+              error={opt.error}
+              loading={dataLoading}
+            />
           </Box>
         </Box>
 
         {/* Section 3: Query Performance Analysis - Full Width */}
         <Box sx={{ mb: 4 }}>
-          <QueryPerformance refreshKey={refreshKey} />
+          <QueryPerformance
+            performanceMetrics={opt.performanceMetrics}
+            error={opt.error}
+            loading={dataLoading}
+            timeRange={timeRange}
+            onTimeRangeChange={setTimeRange}
+          />
         </Box>
 
         {/* Section 4: Optimization History - Full Width */}
         <Box sx={{ mb: 4 }}>
-          <OptimizationHistory refreshKey={refreshKey} />
+          <OptimizationHistory
+            history={opt.history}
+            error={opt.error}
+            loading={dataLoading}
+          />
         </Box>
       </Box>
     </Box>

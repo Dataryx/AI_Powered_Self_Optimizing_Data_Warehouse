@@ -1,9 +1,8 @@
 /**
- * Partition Recommendations Component
- * ML-generated partitioning suggestions - Advisory only
+ * Partition recommendations from workload analysis.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React from 'react';
 import {
   Card,
   CardContent,
@@ -13,13 +12,13 @@ import {
   Paper,
 } from '@mui/material';
 import { TableChart, TrendingDown, TrendingUp, CheckCircle } from '@mui/icons-material';
-import { apiService } from '../../services/api';
 
 interface Recommendation {
   recommendation_id: string;
   type: string;
   table: string;
   partition_column?: string;
+  columns?: string[];
   estimated_improvement?: number;
   cost?: number;
   priority?: string;
@@ -34,14 +33,28 @@ interface Recommendation {
 }
 
 interface PartitionRecommendationsProps {
-  refreshKey?: number;
+  recommendations: Recommendation[] | null;
+  error: string | null;
+  loading: boolean;
+}
+
+function partitionColumnLabel(rec: Recommendation): string | undefined {
+  const direct = rec.partition_column?.trim();
+  if (direct) return direct;
+  const cols = rec.columns;
+  if (Array.isArray(cols) && cols.length > 0 && typeof cols[0] === 'string') {
+    return cols[0].trim();
+  }
+  const anyRec = rec as { column?: string };
+  return anyRec.column?.trim();
 }
 
 export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> = ({
-  refreshKey = 0,
+  recommendations: recs,
+  error,
+  loading,
 }) => {
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const recommendations = recs ?? [];
 
   const buildRationaleLine = (rec: Recommendation) => {
     const explanation = rec.explanation?.trim();
@@ -68,31 +81,13 @@ export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> =
 
     const windowLabel =
       typeof windowDays === 'number'
-        ? `last ${windowDays} days`
+        ? `rolling ${windowDays}-day window`
         : typeof windowQueries === 'number'
-          ? `last ${windowQueries} queries`
-          : 'recent executions';
+          ? `${windowQueries} recorded executions`
+          : 'recent activity';
 
-    return `Why: ${trigger} • Window: ${windowLabel}` as const;
+    return `Rationale: ${trigger} • Observation: ${windowLabel}` as const;
   };
-
-  const fetchRecommendations = useCallback(async () => {
-    try {
-      const data = await apiService.getOptimizationRecommendations('partition', 'pending');
-      setRecommendations(data.recommendations || data.data?.recommendations || []);
-      setLoading(false);
-    } catch (err) {
-      console.error('Error fetching partition recommendations:', err);
-      setRecommendations([]);
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchRecommendations();
-    const interval = setInterval(fetchRecommendations, 30000);
-    return () => clearInterval(interval);
-  }, [fetchRecommendations, refreshKey]);
 
   const getSeverityColor = (priority?: string) => {
     switch (priority?.toLowerCase()) {
@@ -152,6 +147,12 @@ export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> =
           </Box>
         </Box>
 
+        {error && (
+          <Typography variant="caption" sx={{ color: '#b91c1c', display: 'block', mb: 2 }}>
+            {error}
+          </Typography>
+        )}
+
         {loading ? (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Typography variant="body2" sx={{ color: '#64748b' }}>
@@ -165,7 +166,7 @@ export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> =
               variant="body2"
               sx={{ color: '#64748b', fontSize: '0.875rem', mb: 0.5 }}
             >
-              No partition recommendations available
+              No partition recommendations
             </Typography>
             <Typography
               variant="caption"
@@ -176,13 +177,14 @@ export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> =
           </Box>
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {recommendations.map((rec) => {
+            {recommendations.map((rec, idx) => {
               const severity = getSeverityColor(rec.priority);
               const impact = rec.impact || {};
+              const colLabel = partitionColumnLabel(rec);
 
               return (
                 <Paper
-                  key={rec.recommendation_id}
+                  key={`${rec.recommendation_id}-${idx}`}
                   elevation={0}
                   sx={{
                     p: 2,
@@ -224,9 +226,9 @@ export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> =
                       >
                         {buildRationaleLine(rec)}
                       </Typography>
-                      {rec.partition_column && (
+                      {colLabel && (
                         <Chip
-                          label={`Partition by: ${rec.partition_column}`}
+                          label={`Partition by: ${colLabel}`}
                           size="small"
                           sx={{
                             height: '20px',
@@ -336,7 +338,6 @@ export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> =
           </Box>
         )}
 
-        {/* Feedback loop indicator (conceptual) */}
         <Box sx={{ mt: 2.5, pt: 2, borderTop: '1px solid #e2e8f0' }}>
           <Typography
             variant="caption"
@@ -346,7 +347,7 @@ export const PartitionRecommendations: React.FC<PartitionRecommendationsProps> =
               lineHeight: 1.4,
             }}
           >
-            Continuously refined using execution feedback.
+            Recommendations refresh as new execution patterns are observed.
           </Typography>
         </Box>
       </CardContent>

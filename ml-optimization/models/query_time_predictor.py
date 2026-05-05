@@ -3,6 +3,11 @@ Query Time Predictor
 Predicts query execution time using machine learning models.
 """
 
+import warnings
+
+# sklearn + joblib emit this when third-party code uses joblib.Parallel without sklearn's wrappers.
+warnings.filterwarnings("ignore", category=UserWarning, module=r"sklearn\.utils\.parallel")
+
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
@@ -12,7 +17,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import xgboost as xgb
 import joblib
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
 from ml_optimization.config.model_config import QueryTimePredictorConfig
@@ -35,6 +40,7 @@ class QueryTimePredictor:
         self.scaler = StandardScaler()
         self.feature_names = []
         self.feature_importance_ = None
+        self.training_metrics: Optional[Dict[str, Any]] = None
     
     def _create_model(self):
         """Create model based on configuration."""
@@ -175,7 +181,8 @@ class QueryTimePredictor:
         metrics['cv_std'] = np.sqrt(cv_scores.std())
         
         logger.info(f"Model training completed. Test RMSE: {metrics['test_rmse']:.2f} ms")
-        
+
+        self.training_metrics = metrics
         return metrics
     
     def predict(self, query_features: pd.DataFrame) -> np.ndarray:
@@ -237,26 +244,133 @@ class QueryTimePredictor:
         
         return contributions
     
+    def _native_xgboost_path(self, filepath: str) -> Path:
+        """Sidecar JSON next to the joblib bundle (XGBoost-recommended format, no pickle of Booster)."""
+        p = Path(filepath)
+        return p.parent / f"{p.stem}_xgboost.json"
+
     def save_model(self, filepath: str):
-        """Save trained model to file."""
+        """Save trained model to file.
+
+        XGBoost models are stored via ``Booster.save_model`` (JSON); joblib holds scaler/metadata only.
+        Other model types are still fully stored in joblib.
+        """
+        path = Path(filepath)
         model_data = {
-            'model': self.model,
             'scaler': self.scaler,
             'config': self.config,
             'feature_names': self.feature_names,
             'feature_importance': self.feature_importance_,
+            'model_type': self.config.model_type,
+            'training_metrics': self.training_metrics,
         }
+        if self.config.model_type == 'xgboost':
+            if self.model is None:
+                raise ValueError("Model must be trained before save")
+            native = self._native_xgboost_path(filepath)
+            self.model.get_booster().save_model(str(native))
+        else:
+            model_data['model'] = self.model
         joblib.dump(model_data, filepath)
-        logger.info(f"Saved model to {filepath}")
-    
+        logger.info("Saved model to %s", filepath)
+
+    def _slim_xgboost_joblib_bundle(self, filepath: str, model_data: dict) -> None:
+        """Drop pickled estimator from joblib; native JSON holds the tree ensemble."""
+        try:
+            slim = {k: v for k, v in model_data.items() if k != 'model'}
+            slim['model_type'] = 'xgboost'
+            joblib.dump(slim, filepath)
+        except Exception as e:
+            logger.warning('Could not slim XGBoost joblib bundle: %s', e)
+
     def load_model(self, filepath: str):
-        """Load trained model from file."""
-        model_data = joblib.load(filepath)
-        self.model = model_data['model']
+        """Load trained model from file (native XGBoost JSON + slim joblib; migrates legacy pickles once)."""
+        native = self._native_xgboost_path(filepath)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                'ignore',
+                message=r'.*If you are loading a serialized model.*',
+                category=UserWarning,
+            )
+            model_data = joblib.load(filepath)
+
         self.scaler = model_data['scaler']
         self.config = model_data.get('config', QueryTimePredictorConfig())
         self.feature_names = model_data.get('feature_names', [])
         self.feature_importance_ = model_data.get('feature_importance')
-        logger.info(f"Loaded model from {filepath}")
+        self.training_metrics = model_data.get('training_metrics')
+        mtype = model_data.get('model_type', self.config.model_type)
+
+        if mtype != 'xgboost':
+            self.model = model_data.get('model')
+            if self.model is None:
+                raise ValueError('No model in %s' % (filepath,))
+            logger.info('Loaded model from %s', filepath)
+            return
+
+        if native.exists():
+            self._create_model()
+            self.model.load_model(str(native))
+            if 'model' in model_data:
+                self._slim_xgboost_joblib_bundle(filepath, model_data)
+            logger.info('Loaded XGBoost model from %s', native)
+            return
+
+        legacy = model_data.get('model')
+        if legacy is None:
+            raise ValueError(
+                'No model in %s and missing native XGBoost file %s' % (filepath, native)
+            )
+        try:
+            legacy.get_booster().save_model(str(native))
+        except Exception as e:
+            logger.warning('Could not export native XGBoost model: %s', e)
+            self.model = legacy
+            logger.info('Loaded model from %s', filepath)
+            return
+        self._slim_xgboost_joblib_bundle(filepath, model_data)
+        self._create_model()
+        self.model.load_model(str(native))
+        logger.info('Loaded model from %s (migrated to native XGBoost + slim joblib)', filepath)
+
+    def load_xgboost_json_only(self, json_path: str) -> None:
+        """
+        Load weights from native XGBoost JSON when ``query_time_predictor.pkl`` is missing
+        (e.g. only ``query_time_predictor_xgboost.json`` was committed). Fits a synthetic
+        scaler so ``predict`` runs; retrain with ``train_model.py`` for a matching scaler.
+        """
+        path = Path(json_path)
+        if not path.is_file():
+            raise FileNotFoundError(str(path))
+        self.config = QueryTimePredictorConfig(model_type="xgboost")
+        self._create_model()
+        self.model.load_model(str(path))
+        self.feature_names = [
+            "table_count",
+            "join_count",
+            "has_aggregation",
+            "has_window_function",
+            "has_subquery",
+            "has_cte",
+            "filter_predicate_count",
+            "order_by_count",
+            "group_by_count",
+            "estimated_rows_log",
+            "estimated_cost_log",
+            "plan_depth",
+            "calls",
+        ]
+        n = len(self.feature_names)
+        rng = np.random.default_rng(42)
+        self.scaler = StandardScaler()
+        self.scaler.fit(rng.normal(1.0, 0.5, size=(512, n)))
+        self.feature_importance_ = None
+        self.training_metrics = None
+        self._loaded_from_json_only = True
+        logger.warning(
+            "Loaded XGBoost from %s without joblib bundle (scaler is synthetic). "
+            "Run scripts/ml-optimization/train_model.py to save query_time_predictor.pkl for production.",
+            path,
+        )
 
 

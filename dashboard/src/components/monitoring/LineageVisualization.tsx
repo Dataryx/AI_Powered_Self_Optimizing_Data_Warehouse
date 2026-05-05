@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion';
+import type { ElementType } from 'react';
 import { Database, Table2, Repeat2, ChevronRight } from 'lucide-react';
 
 interface NodeData {
-  icon: React.ElementType;
+  icon: ElementType;
   name: string;
   type: string;
   color: string;
@@ -40,7 +41,7 @@ const layers: { name: string; color: string; glow: string; border: string; bg: s
 
 interface LineageVisualizationProps { data?: any; loading?: boolean }
 
-export default function LineageVisualization({ data, loading }: LineageVisualizationProps) {
+export default function LineageVisualization({ data: _data, loading: _loading }: LineageVisualizationProps) {
   let globalDelay = 0;
   return (
     <div className="bg-[#111628] rounded-2xl border border-[#1e2540] overflow-hidden">

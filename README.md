@@ -1,515 +1,326 @@
-## AI-Powered Self-Optimizing Data Warehouse
+# AI-Powered Self-Optimizing Data Warehouse
 
-An end‑to‑end data warehouse that:
-
-- **Ingests data** into a medallion architecture (Bronze → Silver → Gold)
-- **Runs ETL** to clean and aggregate data
-- **Exposes a REST API** for warehouse metadata and analytics
-- **Provides React dashboards** for monitoring and analytics
-- **Collects query logs and trains ML models** to recommend optimizations (e.g. indexes)
-
-This README focuses on: **what each part does, how data flows, how to run it, how the system learns, and how optimization happens.**
-
-### Project Summary (for Professor)
-
-- **Goal**: Demonstrate a complete, working prototype of a **self‑optimizing data warehouse** that not only ingests and transforms data, but also **observes its own workload and learns how to improve performance over time**.
-- **How it runs end‑to‑end**:
-  - PostgreSQL hosts a medallion‑style warehouse (Bronze/Silver/Gold) created from a single DDL file.
-  - A **data generator** produces realistic e‑commerce data and (optionally) loads it into Bronze.
-  - A single **ETL script** (`etl/scripts/run_etl.py`) incrementally moves data Bronze → Silver → Gold, building facts and dimensions.
-  - A **FastAPI backend** exposes warehouse stats, analytics, monitoring, and optimization endpoints on `/api/v1/...`.
-  - A **React monitoring dashboard** calls those endpoints to show: warehouse health, sales analytics, ETL status, storage/cost, alerts, and optimization recommendations.
-  - A separate **ML pipeline** collects query logs, trains models, and produces index recommendations stored in `ml_optimization.index_recommendations` and exposed via the API.
-- **Why this is “good” / non‑trivial**:
-  - It covers the **full lifecycle**: data generation → ingestion → ETL → analytics → monitoring → ML‑driven optimization, rather than focusing on just one piece.
-  - It uses **real database signals** (PostgreSQL schemas, `pg_stat_statements`, `pg_stat_user_tables`, `pg_statio_user_tables`) to drive metrics, alerts, and ML, instead of hard‑coded dummy numbers.
-  - It provides a **closed feedback loop**: the system can observe workload, learn which queries are slow or frequent, generate recommendations (e.g. indexes), and (when wired to `CREATE INDEX`) measure improvement over time.
-  - The architecture and code are organized so each layer is clear and testable: DDL and ETL are decoupled from ML and from the dashboards, but all use the same warehouse.
-
-### Working Mechanism (Step‑by‑Step)
-
-1. **Warehouse Setup**  
-   PostgreSQL is initialized with `bronze`, `silver`, `gold`, `ml_optimization`, and `monitoring` schemas using `complete_warehouse.sql`. This creates all base, dimension, and fact tables that every other component relies on.
-
-2. **Data Ingestion into Bronze**  
-   Either a real source system or the synthetic **data generator** (`data-generator/main.py`) writes raw e‑commerce–style records (customers, products, orders, inventory, sessions, clickstream) into Bronze. At this point the data is raw and not yet analytics‑ready.
-
-3. **ETL: Bronze → Silver → Gold**  
-   The ETL entry point (`etl/scripts/run_etl.py`) reads new rows from Bronze, cleans and standardizes them into Silver, then aggregates and denormalizes them into Gold (facts + dimensions). After ETL, analysts and dashboards can query Gold for fast, business‑friendly metrics.
-
-4. **API Reads the Warehouse**  
-   The FastAPI service (`ml-optimization/api/main.py`) connects to the same PostgreSQL instance and exposes REST endpoints that compute row counts, sizes, sales metrics, top products, freshness, storage usage, cache hit‑rates, etc., by querying Bronze/Silver/Gold and `pg_*` views.
-
-5. **Dashboards Visualize State and Analytics**  
-   The React monitoring dashboard (`monitoring-dashboard/`) calls those API endpoints to render the **Data Warehouse Dashboard** (medallion overview + sales KPIs and charts) and additional monitoring pages (ETL jobs, freshness, data quality, storage, alerts, optimizations). This is how users and instructors “see” the warehouse in action.
-
-6. **Workload Generation and Query Logging**  
-   As users and BI tools query the warehouse (especially Gold tables), PostgreSQL records statistics in `pg_stat_statements`. The **QueryLogCollector** script (`run_query_collection.py`) periodically reads those stats and persists them into `ml_optimization.query_logs`, capturing which queries run, how long they take, and how often.
-
-7. **ML Training and Recommendation Generation**  
-   The training script (`train_all_models.py`) consumes `query_logs` to fit models (workload clustering, query‑time prediction, anomaly detection). The recommendation script (`generate_recommendations.py`) uses those logs and models to propose concrete optimizations (e.g. “add an index on `gold.fact_sales(order_date_key, product_key)`”), which are stored in `ml_optimization.index_recommendations`.
-
-8. **Serving and Applying Optimizations**  
-   Optimization endpoints (`/api/v1/optimization/...`) surface recommendations to the dashboard or external tools. When the `apply` path is fully implemented, the system can translate a recommendation into `CREATE INDEX` or related DDL, apply it to PostgreSQL, and mark the recommendation as applied.
-
-9. **Feedback Loop and Self‑Optimization**  
-   After optimizations are applied, future queries run faster (or more efficiently), which is reflected back into `pg_stat_statements` and subsequently into `query_logs`. Re‑running the collection, training, and recommendation steps lets the system measure impact and refine future suggestions, closing the **self‑optimization loop**.
+**Presentation-ready overview** for academic evaluation: problem framing, architecture, ML design, algorithms, implementation, and a short demo script.
 
 ---
 
-## 1. High‑Level Architecture
+## 1. Problem Statement & Motivation
 
-- **Database**: PostgreSQL with schemas:
-  - `bronze` – raw / staging data
-  - `silver` – cleaned, conformed data
-  - `gold` – star‑schema analytics (facts + dimensions)
-  - `ml_optimization` – query logs and ML metadata
-  - `monitoring` – ETL and monitoring metadata
-- **Data Generator** (`data-generator/`): creates synthetic e‑commerce data (customers, products, orders, inventory, reviews, sessions, clickstream) and can load it into Bronze.
-- **ETL Pipeline** (`etl/scripts/run_etl.py`): moves data Bronze → Silver → Gold incrementally.
-- **ML Optimization Service** (`ml-optimization/api/`): FastAPI service that:
-  - Reads the warehouse and monitoring schemas
-  - Serves REST endpoints for warehouse stats, metrics, recommendations, alerts, storage, etc.
-  - Serves as backend for the monitoring dashboard.
-- **Monitoring Dashboard** (`monitoring-dashboard/`): React app that calls the API to show:
-  - Warehouse overview (Bronze / Silver / Gold)
-  - Sales analytics (from Gold)
-  - ETL status, data freshness, data quality
-  - Storage, cache, cost, alerts, optimization recommendations
-- **ML Pipeline** (`ml-optimization/`, `scripts/ml-optimization/`):
-  - Collects query logs from PostgreSQL (`pg_stat_statements`)
-  - Trains models (query time prediction, workload clustering, anomaly detection)
-  - Generates optimization recommendations (e.g. indexes)
+### Limitations of traditional data warehouses
+
+| Limitation | What goes wrong | Why it matters |
+|------------|-----------------|----------------|
+| **Manual tuning** | DBAs pick indexes, partitions, and parameters by intuition or ad hoc EXPLAIN plans. | Slow iteration; expertise does not scale with data or query growth. |
+| **Static physical design** | Schemas and partitioning are fixed at deployment; workload shifts (new reports, seasonality) are not reflected automatically. | Yesterday’s optimal layout becomes today’s full table scan. |
+| **Performance bottlenecks** | Hot tables, sequential scans, poor join order, cache pressure. | Latency spikes for analysts and downstream apps; SLA risk. |
+| **Cost inefficiency** | Over-provisioning “just in case,” or under-provisioning and firefighting. | Cloud bills and operational load grow faster than business value. |
+
+**Analogy:** A traditional warehouse is like a highway network designed once for morning traffic—if evening patterns change, congestion appears until someone manually adds lanes (indexes) or redraws districts (partitions).
+
+### Why automation and intelligence are necessary
+
+- **Workload is continuous:** Query mix, volume, and data skew change; static rules cannot cover all cases.
+- **Signal is abundant:** Execution time, I/O, buffer hits, and query text are measurable—machine learning can turn them into **prioritized actions** (what to index, what to partition, what to watch).
+- **Human bandwidth is finite:** Automation proposes candidates; humans (or policy) approve—reducing toil while keeping governance.
 
 ---
 
-## 2. How Data Enters and Flows Through the Warehouse
+## 2. System Architecture (End-to-End)
 
-### 2.1 Create Schemas and Tables
+### Layered view
 
-PostgreSQL must have at least:
-
-- Schemas: `bronze`, `silver`, `gold`, `ml_optimization`, `monitoring`
-- Tables for each layer, defined in:
-  - `data-warehouse/schemas/complete_warehouse.sql` (canonical medallion schema)
-
-Typical setup:
-
-1. Start PostgreSQL (Docker or local).
-2. Run the warehouse DDL:
-   - `psql -f data-warehouse/schemas/complete_warehouse.sql`
-
-This creates all Bronze, Silver, and Gold tables used by the ETL.
-
-### 2.2 Loading Bronze (Raw) Data
-
-You have two main options:
-
-- **External / real source**: load your own data into the Bronze tables defined in `complete_warehouse.sql` (`bronze.customer`, `bronze.orders`, etc.).
-- **Synthetic data generator** (`data-generator/`):
-  - Generates:
-    - Customers
-    - Products
-    - Orders + order items
-    - Inventory movements
-    - Product reviews
-    - Web sessions
-    - Clickstream events
-  - Uses `Faker` and configuration in `data-generator/config.py`.
-  - When run with `--load`, uses `BatchLoader` to insert into Bronze tables (by default, the alternative `raw_*` schema; you can adapt it to target your main Bronze tables if desired).
-
-Run the generator from the repo root (after installing its requirements):
-
-```bash
-cd data-generator
-pip install -r requirements.txt
-
-# Generate data only (no DB load)
-python main.py
-
-# Generate and load into Bronze (uses DataGeneratorConfig DB settings)
-python main.py --load
-
-# Override volumes
-python main.py --load --customers 5000 --products 2000 --days 90
+```mermaid
+flowchart TB
+  subgraph vis[Visualization and monitoring]
+    UI[React dashboards, alerts, WebSockets]
+  end
+  subgraph opt[Optimization and AI layer]
+    API[FastAPI: recommendations, metrics, ML scoring]
+  end
+  subgraph qe[Query engine and catalog]
+    PG[PostgreSQL: SQL, pg_stat_statements, EXPLAIN]
+  end
+  subgraph proc[Processing]
+    ETL[ETL and ELT: bronze to silver to gold]
+  end
+  subgraph stor[Storage]
+    MW[(Medallion schemas in PostgreSQL)]
+  end
+  subgraph ing[Ingestion]
+    BATCH[Batch-oriented loaders]
+  end
+  ing --> stor
+  stor --> proc
+  proc --> PG
+  PG --> API
+  API --> UI
 ```
 
-Key components (data-generator):
+*Plain-text flow (top-down):* **Ingestion → Storage (medallion) → ETL/ELT → PostgreSQL → ML/optimization API → Dashboards.**
 
-- `config.py` – `DataGeneratorConfig` (DB connection, volumes, seeds).
-- `generators/*.py` – customer, product, order, inventory, review, session, clickstream generators.
-- `loaders/batch_loader.py` – bulk inserts into Bronze tables using `psycopg2.execute_batch`.
+**Ingestion (batch + streaming posture)**  
+- **Implemented:** Batch-oriented ingestion and ETL-style scripts into **bronze** (raw/near-raw).  
+- **Extensible:** The same medallion pattern can accept **streaming** sources (e.g., change streams, CDC) by landing events into bronze with append-only tables or staging topics—this project emphasizes **batch + periodic refresh** for clarity and reproducibility in an academic setting.
 
-### 2.3 ETL: Bronze → Silver → Gold
+**Storage layer**  
+- **Primary warehouse:** **PostgreSQL** with **medallion architecture** (**bronze → silver → gold**): progressive refinement, governance, and consumption-ready marts/facts/dims.  
+- **Hybrid posture:** Conceptually a **warehouse-centric** design; a **data lake** (object storage + open formats) can sit alongside for cheap archival or ML feature stores without changing the optimization loop’s core idea.
 
-Single entry point:
+**Processing layer (ETL/ELT)**  
+- Transformations promote data across tiers (cleansing, conforming, aggregating).  
+- Lineage and freshness concepts support monitoring (“is gold stale?”).
 
-```bash
-python etl/scripts/run_etl.py
-```
+**Query engine**  
+- **PostgreSQL** executes analytical and operational SQL; **pg_stat_statements** (when enabled) exposes normalized query text and timing aggregates.
 
-What it does (simplified):
+**Optimization / AI layer**  
+- **FastAPI** service (`ml-optimization`): collects or reads workload statistics, runs **trained models**, merges **rule-based** catalog checks, and exposes **index**, **partition**, and related recommendations to the UI and APIs.
 
-1. **Bronze → Silver (transform/clean)**:
-   - Reads new rows from each Bronze table.
-   - Cleans and standardizes data.
-   - Resolves keys (e.g. natural IDs → surrogate keys).
-   - Inserts into corresponding Silver tables with `ON CONFLICT DO NOTHING`.
-   - Order respects dependencies (country → location → warehouse; person → customer/employee → orders → order_item, etc.).
-2. **Silver → Gold (aggregate / star schema)**:
-   - Builds dimension tables (`gold.dim_customer`, `gold.dim_product`, `gold.dim_date`, etc.).
-   - Builds fact and aggregate tables (`gold.fact_sales`, `gold.fact_orders`, `gold.agg_daily_sales`, etc.).
-3. **Incremental**:
-   - Designed to process only new / changed rows, so you can re‑run ETL as more data lands in Bronze.
+**Visualization / monitoring**  
+- **React (Vite)** dashboards: optimizations, analytics, monitoring, storage, alerts, settings.  
+- **WebSockets** (where implemented) push near–real-time updates for optimization and activity.
 
-Helpers:
+### Data flow (step-by-step)
 
-- `scripts/verify_schemas_and_tables.py` – checks that required schemas and tables exist.
-- `scripts/verify_etl_population.py` – inspects row counts after ETL.
-- `scripts/truncate_all_layers.py` – resets Bronze/Silver/Gold for a fresh run.
-
-**Running ETL on a schedule (cron / Task Scheduler):** Use `etl/scripts/run_etl_cron.sh` (Linux/macOS) or `etl/scripts/run_etl_cron.ps1` (Windows). Each run is recorded in `monitoring.etl_jobs` and shown in the dashboard (Recent ETL Runs, ETL metrics, Errors & Retries). See **[docs/ETL_CRON_AND_MONITORING.md](docs/ETL_CRON_AND_MONITORING.md)** for crontab examples and Task Scheduler setup.
-
----
-
-## 3. Backend API: How the Warehouse Is Exposed
-
-The **ML Optimization API** (`ml-optimization/api/main.py`) is a FastAPI app that exposes:
-
-- Warehouse endpoints (`/api/v1/warehouse/...`)
-- Monitoring endpoints (`/api/v1/monitoring/...`)
-- Storage endpoints (`/api/v1/storage/...`)
-- Alert endpoints (`/api/v1/alerts/...`)
-- Optimization endpoints (`/api/v1/optimization/...`)
-- Generic metrics and recommendations stubs (`/api/v1/metrics/...`, `/api/v1/recommendations/...`)
-
-### 3.1 Starting the API
-
-From the project root:
-
-```bash
-# Recommended entry if provided
-python start_services.py
-
-# Or directly with uvicorn
-uvicorn ml_optimization.api.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Then:
-
-- Open `http://localhost:8000/docs` for interactive Swagger UI.
-- Health check:
-  - `GET http://localhost:8000/health`
-
-Base URL used by the dashboard:
-
-- `http://localhost:8000/api/v1`
-
-### 3.2 Key Warehouse Endpoints (used by the Dashboard)
-
-Under `ml-optimization/api/routes/warehouse_routes.py`:
-
-- **Warehouse summary**  
-  - `GET /api/v1/warehouse/summary`  
-  - Returns table counts, estimated rows, and sizes for Bronze, Silver, Gold, plus DB name.
-
-- **Schemas & tables**  
-  - `GET /api/v1/warehouse/schemas` – list `bronze`, `silver`, `gold` and table counts.  
-  - `GET /api/v1/warehouse/tables/{schema}` – list tables and column counts.  
-  - `GET /api/v1/warehouse/stats/{schema}/{table}` – row count + size for a table.  
-  - `GET /api/v1/warehouse/data/{schema}/{table}?limit=&offset=` – sample rows (used by data explorer).
-
-- **Sales & customers (Gold analytics)**  
-  - `GET /api/v1/warehouse/sales-stats` – total sales, revenue, average sale, daily sales (30 days), top products.  
-  - `GET /api/v1/warehouse/top-products?limit=20` – top products by revenue, used by the Top Products chart.  
-  - `GET /api/v1/warehouse/customer-stats` – total customers and orders summary.
-
-These endpoints read from **Gold** tables (`gold.fact_sales`, `gold.fact_orders`, `gold.dim_customer`, `gold.dim_product`) so the dashboard always shows analytics over the cleaned, aggregated layer.
+1. **Sources → bronze:** Raw or lightly typed data lands via batch jobs.  
+2. **bronze → silver:** Cleaning, keys, conforming dimensions, denormalization as needed.  
+3. **silver → gold:** Facts/dims, aggregates, business-ready tables for BI and ML features.  
+4. **Consumers query gold/silver** (and sometimes bronze for exploration).  
+5. **PostgreSQL** records execution statistics (**pg_stat_statements**) and plans.  
+6. **Collector** materializes workload snapshots into **`ml_optimization.query_logs`** (and related state).  
+7. **ML + rules** score queries and (table, column) pairs → **recommendations** (indexes, partition hints, cache-related signals where modeled).  
+8. **Dashboards** show recommendations, monitoring KPIs, and allow **human-in-the-loop** apply/reject workflows where wired.  
+9. **Feedback:** New executions after changes refresh stats; models can be **retrained** on updated logs.
 
 ---
 
-## 4. Monitoring: ETL, Freshness, Data Quality, Storage, Alerts
+## 3. Core Innovation: Self-Optimizing Engine
 
-The API also provides rich monitoring endpoints (see `ml-optimization/api/routes/monitoring_routes.py`, `storage_routes.py`, `alert_routes.py`):
+### What “self-optimizing” means here
 
-- **ETL jobs & pipeline**
-  - `GET /api/v1/monitoring/etl/jobs` – entries from `monitoring.etl_jobs` (status, progress, records processed).
-  - `GET /api/v1/monitoring/etl/pipeline-dag` – static DAG structure describing Bronze→Silver→Gold pipeline.
-  - `ws://localhost:8000/api/v1/ws/etl-jobs` – WebSocket streaming ETL job updates.
+Not “the database rewrites itself with no oversight,” but a **closed loop**:
 
-- **Data freshness**
-  - `GET /api/v1/monitoring/etl/freshness`  
-  - Uses `monitoring.etl_jobs` and/or timestamp columns in Bronze/Silver/Gold to estimate last update time, hours ago, and freshness status per table and per layer.
+1. **Observe** workload (queries, latency, I/O, frequency).  
+2. **Infer** pain points (slow patterns, anomalies, skewed columns).  
+3. **Recommend** concrete physical-design and tuning actions.  
+4. **Learn** from updated telemetry after changes (or from continued traffic).
 
-- **ETL errors & retries**
-  - `GET /api/v1/monitoring/etl/errors` – failed ETL jobs + heuristic issues (e.g., tables with no data despite completed jobs).
+### Types of optimizations
 
-- **Throughput**
-  - `GET /api/v1/monitoring/etl/throughput` – records/second derived from ETL job durations or `pg_stat_user_tables`.
+| Category | Role in this system |
+|----------|---------------------|
+| **Query optimization** | Identify expensive patterns; correlate with model predictions vs. actuals; surface outliers. |
+| **Indexing strategies** | Suggest B-tree (and conceptually other) indexes on high-impact (table, column) pairs seen in predicates/joins. |
+| **Partitioning** | Suggest **range-friendly** keys (time / ingest columns) when filters align with partition pruning. |
+| **Resource allocation** | Monitoring and cost/storage views support **capacity** decisions; ML can prioritize what to fix first (ROI-style ranking). |
 
-- **Data quality**
-  - `GET /api/v1/monitoring/data-quality` – per‑table quality scores based on dead tuples, row counts, and ETL success rates.
+### Feedback loop
 
-- **Storage, cache, cost**
-  - `GET /api/v1/storage/utilization` – per‑table size, per‑schema totals, overall size.  
-  - `GET /api/v1/storage/growth-trends?days=30` – approximate growth rates and synthetic time series.  
-  - `GET /api/v1/storage/compression` – per‑table compression ratio estimates.  
-  - `GET /api/v1/storage/cache` – cache hit rates from `pg_statio_user_tables`.  
-  - `GET /api/v1/storage/resources` – connection counts and DB size.  
-  - `GET /api/v1/storage/cost` – storage cost estimates by schema (e.g., $/GB/month).
-
-- **Alerts, anomalies, incidents**
-  - `GET /api/v1/alerts/active` – generated alerts (empty tables, high dead tuples, low cache hit rate, large tables, etc.).  
-  - `GET /api/v1/alerts/history?days=30` – synthetic alert history.  
-  - `GET /api/v1/alerts/anomalies` – anomalies in insert rates and row size.  
-  - `GET /api/v1/alerts/incidents` – groups of alerts presented as incidents.  
-  - `POST /api/v1/alerts/acknowledge/{alert_id}` – mark an alert as acknowledged (in‑memory).  
-  - `GET /api/v1/alerts/config` / `POST /api/v1/alerts/config` – read / update alert thresholds (in‑memory stub).
+- **Telemetry in:** `query_logs` + `pg_stat_statements` + optional anomaly scores.  
+- **Models update beliefs:** Retrain predictors/clusterers on fresh logs.  
+- **Rules guardrail:** Catalog validation (table/column exists, allowlisted schemas) prevents nonsense DDL.  
+- **Human or automated apply:** Apply events and audit trails (where implemented) close the loop.
 
 ---
 
-## 5. Frontend: Monitoring Dashboard and How It Uses the API
+## 4. Machine Learning Component (Detailed)
 
-The monitoring dashboard lives under `monitoring-dashboard/` and is a React + MUI app.
+### Problem the ML stack solves
 
-### 5.1 Start the Dashboard
+**Primary:** Predict and rank **which access paths and workload signatures are “expensive” or “anomalous”** so the system can prioritize **index/partition/cache**-style actions instead of treating all queries equally.
 
-From the repo root:
+**Secondary:** Group **workloads** (clustering) and support **cache behavior** signals where a cache predictor is trained—so optimization is not only “one query at a time” but **pattern-level**.
 
-```bash
-cd monitoring-dashboard
-npm install      # or yarn
-npm run dev      # or yarn dev
-```
+### Type of learning
 
-Configure the backend URL via `VITE_API_BASE_URL` (defaults to `http://localhost:8000/api/v1`).
+| Technique | Use in project | Label / signal |
+|-----------|----------------|----------------|
+| **Supervised learning** | **Query execution time prediction** (regression): features from logs/plans → predict latency. | Target: `mean_exec_time_ms` (or related). |
+| **Unsupervised learning** | **Workload clustering** (e.g., k-means on query/feature vectors). | No explicit label; discovers query “families.” |
+| **Anomaly detection** | **Unsupervised / novelty detection** on query metrics (e.g., Isolation Forest–style). | “Unusual” = high severity for recommendations. |
+| **Reinforcement learning** | *Not the primary path* in this codebase; could be future work (actions = index add / partition; reward = latency/cost). | N/A today. |
 
-### 5.2 Data Warehouse Dashboard Page
+### Features (examples)
 
-Key file: `monitoring-dashboard/src/pages/DashboardPage.tsx`.
+- **Query text–derived features:** joins, aggregations, filters, subqueries, estimated cost/rows (when EXPLAIN features are extracted).  
+- **Runtime metrics:** `mean_exec_time_ms`, `calls`, buffer hit/read counts, rows affected.  
+- **Frequency & scale proxies:** call counts, I/O, table touch patterns inferred from logs.
 
-On load it calls:
+### Model choices (and intuition)
 
-- `GET /api/v1/warehouse/summary` → Warehouse overview card (Bronze/Silver/Gold counts & sizes) + database name.
-- `GET /api/v1/warehouse/sales-stats` → KPI tiles, Sales chart, top products data.
-- `GET /api/v1/warehouse/customer-stats` → Total customers KPI.
+| Model | Role | Why it fits |
+|-------|------|-------------|
+| **Gradient boosting (XGBoost)** | Regression on execution time | Strong tabular performance; handles nonlinear interactions among discrete “shape” features and continuous metrics. |
+| **Tree ensembles / sklearn regressors** | Alternative or baseline predictors | Interpretable feature importances; good academic baselines. |
+| **Isolation Forest (typical anomaly pattern)** | Flag outlier workloads | Unsupervised; no need for labeled “bad queries” at scale. |
+| **k-means (or similar)** | Workload clustering | Groups queries for **cohort-level** tuning (e.g., “nightly ETL cluster”). |
 
-Charts/components:
+**Why not only deep learning?** For structured log features and moderate data sizes, **GBDTs** often win on accuracy vs. complexity and train quickly—important for a project that must **retrain** on new logs.
 
-- `WarehouseOverview` – shows Bronze/Silver/Gold metrics.
-- `SalesChart` – area chart of daily sales (last 30 days).
-- `TopProductsChart` – vertical bar chart of top products by revenue.
-  - Also directly calls `GET /api/v1/warehouse/top-products?limit=20` if no data provided.
-- Additional cards show total records, total tables, revenue, average sale value, and customers.
+### Training pipeline (conceptual)
 
-If the API is offline, the dashboard falls back to a mock data service so you can still demonstrate the UI.
+1. **Collect** `query_logs` from `pg_stat_statements` / collector.  
+2. **Clean** invalid rows; align schema; cap outliers if needed.  
+3. **Feature extraction** per row (text + numeric + optional plan JSON).  
+4. **Train/validate** (holdout or cross-validation) time predictor; train anomaly detector; train clusterer.  
+5. **Serialize** artifacts under `ml-optimization/saved_models/`.  
+6. **Serve** in FastAPI: load once (cached), score live samples.
 
-Other pages (Monitoring, Storage, Analytics, Data Explorer) call the `/monitoring`, `/storage`, `/alerts`, and `/optimization` endpoints described above.
+### Evaluation metrics
 
----
-
-## 6. ML and Self‑Optimization: How It Learns and Optimizes
-
-The “self‑optimizing” part is implemented under `ml-optimization/` and `scripts/ml-optimization/`.
-
-### 6.1 Collecting Query Logs
-
-Script (from project root):
-
-```bash
-python scripts/ml-optimization/run_query_collection.py
-```
-
-What it does:
-
-- Connects to PostgreSQL.
-- Reads from `pg_stat_statements` (and/or other query stats).
-- Populates `ml_optimization.query_logs` with:
-  - `query_text`
-  - Execution times, number of calls
-  - Rows processed
-  - Buffer hits/reads
-  - Timestamps
-  - Extracted features (e.g., presence of joins, filters) if configured.
-
-### 6.2 Training ML Models
-
-Script:
-
-```bash
-python scripts/ml-optimization/train_all_models.py
-```
-
-It:
-
-- Loads data from `ml_optimization.query_logs` (e.g., recent N queries).
-- Builds feature vectors for each query.
-- Trains:
-  - **Workload clustering** (e.g., K‑Means) – groups queries by behavior.
-  - **Query time predictor** (regression; tree‑based / boosting) – predicts execution time.  
-  - **Anomaly detector** (e.g., Isolation Forest) – flags slow/outlier queries.
-- Saves model artifacts in `ml-optimization/saved_models/`.
-
-Configuration for models and training is under `ml-optimization/config/` (e.g., minimum samples, hyperparameters).
-
-### 6.3 Generating Optimization Recommendations
-
-Script:
-
-```bash
-python scripts/ml-optimization/generate_recommendations.py
-```
-
-It analyzes `ml_optimization.query_logs` (and model outputs) to create recommendations, stored in:
-
-- `ml_optimization.index_recommendations`
-
-Typical recommendation fields:
-
-- Table name, column(s) to index
-- Estimated improvement (e.g., % latency reduction)
-- Priority (high/medium/low)
-- Supporting query statistics (query count, avg exec time, etc.)
-
-### 6.5 When Workload Clustering, Query‑Time Prediction, and Anomaly Detection Run
-
-In the current implementation, **the system “knows” when to perform ML tasks based on the scripts you run and simple data‑availability checks** (rather than always‑on background daemons). This is intentional so you can control the cadence (e.g., after enough workload has accumulated).
-
-- **Triggering point (you decide when):**
-  - You or a scheduler (cron, Airflow, etc.) run:
-    - `run_query_collection.py` → collect fresh query logs.
-    - `train_all_models.py` → (re)train models when there is enough new data.
-    - `generate_recommendations.py` → refresh recommendations from the latest models + logs.
-- **Inside `train_all_models.py`:**
-  - The script queries `ml_optimization.query_logs` and **checks simple thresholds** (e.g., minimum number of recent rows, non‑null execution times) before training each model.
-  - If there is not enough data for a given task (clustering, prediction, anomaly detection), that part is skipped or logged instead of training on tiny samples.
-  - When thresholds are met:
-    - **Workload clustering** groups similar queries so you can see workload patterns and later reason about which groups to optimize.
-    - **Query‑time prediction** is trained as a regression model to estimate execution time from query features, which can be used in more advanced advisors.
-    - **Anomaly detection** learns a “normal” distribution of query performance and flags queries whose behavior deviates strongly (e.g., suddenly much slower), which can drive alerts or targeted optimization.
-- **How you would automate it in production:**
-  - Run `run_query_collection.py` and `train_all_models.py` on a schedule (e.g., nightly or hourly) via cron/Airflow.
-  - Optionally run `generate_recommendations.py` right after training, so the `/optimization/recommendations` API always reflects the latest workload.
-
-In short, the ML components are **event‑driven by your scheduled scripts plus simple “do we have enough fresh data?” checks** inside those scripts, not by hard‑coded timers inside the API.
-
-**Conceptual view (no scripts):**
-
-- The system periodically looks at **recent query logs** and decides whether there is enough fresh, high‑quality data to justify retraining; if not, it waits.  
-- When there is enough data, it runs a **single training pass** that: (1) clusters queries into workload groups based on their SQL structure, (2) learns a regression model that predicts query execution time from query features, and (3) fits an anomaly detector that learns what “normal” performance looks like and flags outliers.  
-- Those trained models are then used indirectly to drive **index/optimization recommendations** and to highlight problematic queries or workloads, closing the self‑optimization loop.
-
-### 6.4 Surfacing & Applying Recommendations via API
-
-Endpoints in `ml-optimization/api/routes/optimization_routes.py`:
-
-- `GET /api/v1/optimization/recommendations?type=&status=`  
-  Returns a list of recommendations from `ml_optimization.index_recommendations` (normalized for the frontend).
-
-- `POST /api/v1/optimization/recommendations/{id}/apply`  
-  Accepts a JSON body:
-
-  ```json
-  {
-    "optimization_id": "<same-id>",
-    "auto": false
-  }
-  ```
-
-  Currently returns a stub “applied” response; this is the hook where you would:
-  - Execute `CREATE INDEX ...` or `ALTER TABLE ...` statements against Postgres.
-  - Update status in `index_recommendations` and any history tables.
-
-Through the dashboard and these endpoints, the system forms a **closed loop**:
-
-1. Workload hits the warehouse (queries against Bronze/Silver/Gold).
-2. Query logs are collected into `ml_optimization.query_logs`.
-3. ML models are trained / updated.
-4. Recommendations are generated and served via the API.
-5. User (or auto‑mode) applies recommendations.
-6. New query logs reflect the impact; models can be retrained to refine future decisions.
-
-This is what makes the warehouse **self‑optimizing** rather than static.
+| Metric | Meaning |
+|--------|---------|
+| **MAE / RMSE** (time prediction) | Average error in predicted vs. actual latency (ms). |
+| **R²** | Explained variance (guarded: can mislead on noisy logs). |
+| **Precision@k / manual review** (recommendations) | Of top-k suggested indexes, how many validated by EXPLAIN or DBA. |
+| **Latency reduction (A/B)** | Before/after index or partition on representative queries. |
+| **Cost proxy** | I/O reduction, cheaper instance size, or fewer scanned blocks. |
 
 ---
 
-## 7. End‑to‑End “Quickstart” Flow
+## 5. Logic & Decision-Making Flow
 
-Here is a practical sequence to run the full project locally:
+### Step-by-step: how workload leads to optimization
 
-1. **Set up Postgres and schemas**
-   - Start PostgreSQL (Docker or local).
-   - Run `data-warehouse/schemas/complete_warehouse.sql` to create Bronze/Silver/Gold tables.
+1. **Traffic** hits PostgreSQL; stats accumulate.  
+2. **Collector** writes/updates **`ml_optimization.query_logs`**.  
+3. On **GET /recommendations** (or websocket tick), the API **samples** recent logs and/or `pg_stat_statements`.  
+4. **Parsing heuristics** extract candidate **(schema.table, column)** pairs from SQL (qualified names, WHERE patterns, broad hints).  
+5. **Partition candidates** filter to **time/range-suitable** columns.  
+6. **ML scoring:** predictor residual or anomaly score → **severity**; groups aggregate by (type, table, column).  
+7. **Rule merge:** optional pg_stat/catalog hints, redundancy filters, allowlisted schemas.  
+8. **Output:** ranked recommendations with DDL templates; **persist** or live-merge for UI.
 
-2. **(Optional) Generate synthetic Bronze data**
-   - Configure DB connection in `data-generator/config.py` or environment variables (`POSTGRES_HOST`, `POSTGRES_DB`, etc.).
-   - From `data-generator/`:
-     - `pip install -r requirements.txt`
-     - `python main.py --load`
+### When to adapt vs. not adapt
 
-3. **Run ETL to Silver & Gold**
-   - From project root:
-     - `python scripts/verify_schemas_and_tables.py` (optional check)
-     - `python etl/scripts/run_etl.py`
-     - `python scripts/verify_etl_population.py` (see row counts).
+- **Adapt (suggest / rank high)** when evidence shows repeated access + high cost + model/anomaly severity.  
+- **Do not adapt** when: column already leading an index, table too small, schema not allowlisted, insufficient evidence (`OPTIMIZATION_MIN_QUERY_EVIDENCE_HITS`), or recommendation fails validation.
 
-4. **Start the API**
-   - `python start_services.py`  
-   - Or: `uvicorn ml_optimization.api.main:app --reload --port 8000`
+### Rules + ML hybrid
 
-5. **Start the monitoring dashboard**
-   - `cd monitoring-dashboard`
-   - `npm install`
-   - `npm run dev`
-   - Open the shown URL (typically `http://localhost:5173`) and ensure `VITE_API_BASE_URL` points to `http://localhost:8000/api/v1`.
-
-6. **Collect query logs and train models**
-   - Generate some workload (e.g., run queries against Gold tables, use the dashboard/data explorer, run reporting queries).
-   - Then:
-     - `python scripts/ml-optimization/run_query_collection.py`
-     - `python scripts/ml-optimization/train_all_models.py`
-     - `python scripts/ml-optimization/generate_recommendations.py`
-
-7. **Inspect and apply recommendations**
-   - Via Postman or browser:
-     - `GET http://localhost:8000/api/v1/optimization/recommendations`
-   - (When implemented) use:
-     - `POST http://localhost:8000/api/v1/optimization/recommendations/{id}/apply`
-   - Observe impact by:
-     - Re‑running `run_query_collection.py`
-     - Calling `/api/v1/optimization/query-performance`
-     - Checking dashboard charts and metrics.
+- **ML** proposes **priority** and surfaces **non-obvious** outliers.  
+- **Rules** enforce **safety** (real tables/columns, schema policy) and **explainability** (partition vs. index templates).
 
 ---
 
-## 8. Key Paths and Commands (Cheat Sheet)
+## 6. Algorithms Used (Concise)
 
-- **Warehouse schema DDL**: `data-warehouse/schemas/complete_warehouse.sql`
-- **Data generator**:
-  - Code: `data-generator/`
-  - Run: `python data-generator/main.py [--load]`
-- **ETL pipeline**:
-  - Entry: `etl/scripts/run_etl.py`
-  - Verify schemas: `scripts/verify_schemas_and_tables.py`
-  - Verify row counts: `scripts/verify_etl_population.py`
-  - Truncate layers: `scripts/truncate_all_layers.py`
-- **API / backend**:
-  - App: `ml-optimization/api/main.py`
-  - Start: `python start_services.py` or `uvicorn ml_optimization.api.main:app --reload`
-- **Monitoring dashboard**:
-  - Code: `monitoring-dashboard/`
-  - Start: `npm run dev`
-- **ML / optimization**:
-  - Collect logs: `scripts/ml-optimization/run_query_collection.py`
-  - Train models: `scripts/ml-optimization/train_all_models.py`
-  - Generate recommendations: `scripts/ml-optimization/generate_recommendations.py`
-  - Query performance API: `GET /api/v1/optimization/query-performance`
+| Area | Technique | Intuition |
+|------|-----------|-----------|
+| **Query optimization (advisory)** | Pattern mining over logs + EXPLAIN-derived features | “Queries that look like X tend to cost Y.” |
+| **Index recommendation** | (Table, column) grouping + scoring | Frequent filters on `customer_id` without supporting index → high benefit. |
+| **Partitioning** | Time-key detection + workload filters | Range predicates on `order_date` → prune partitions instead of scanning full history. |
+| **Clustering** | k-means on feature vectors | Discover stable workload modes (interactive BI vs. batch). |
+| **Anomaly detection** | Isolation-style on metric vectors | “This query is unusual for our fleet—inspect first.” |
+| **Regression** | XGBoost / ensemble | Map features to expected latency; big gap → suspicious or mis-tuned. |
 
-This README should give you a single place to understand **what the project does, how data flows, how to run it, how it exposes data, and how the self‑optimization loop works.**
+---
 
+## 7. Implementation Details
 
+### Tech stack (as reflected in this repository)
 
+| Component | Technology | Rationale |
+|-----------|------------|-----------|
+| **Warehouse / engine** | **PostgreSQL** | Mature optimizer, `pg_stat_statements`, broad academic/industry familiarity. |
+| **ETL / scripts** | **Python** | Rapid data engineering, ML ecosystem integration. |
+| **ML API** | **FastAPI** | Typed APIs, async-friendly, easy OpenAPI for dashboards. |
+| **Models** | **scikit-learn**, **XGBoost**, **pandas**, **numpy** | Standard stack for tabular ML and teaching clarity. |
+| **Frontends** | **React + Vite**, TypeScript | Interactive dashboards for monitoring and optimization UX. |
+| **Real-time** | **WebSockets** (where enabled) | Live optimization/monitoring updates. |
 
+*Not required for the core thesis:* Kafka, Spark, Snowflake, Airflow—those can be integrated for **scale-out ingestion** or **orchestration** without changing the self-optimization concept.
 
+### Scalability
 
-Storage page hidden
+- **Vertical scaling** of PostgreSQL; **read replicas** for analytics; **partitioning** for large facts.  
+- **ML service** stateless aside from models—scale API replicas; **batch retraining** off-peak.
+
+### Fault tolerance
+
+- Collector and API failures should **degrade gracefully**: fall back to last `query_logs` snapshot or rule-only hints.  
+- **Idempotent** ETL and recommendation persistence reduce duplicate apply risk.
+
+---
+
+## 8. Performance Results (How to Report Honestly)
+
+This section should match **your measured** runs. Use the following **template** in presentations; fill with your numbers.
+
+| Scenario | Before | After | Delta |
+|----------|--------|-------|-------|
+| Representative aggregate on fact table | e.g. 4.2 s | e.g. 0.35 s | ~12× faster |
+| High-selectivity filter query | e.g. seq scan | index scan | X% buffer reads avoided |
+| Storage / churn | baseline | partitioned prune | fewer blocks touched |
+
+**Suggested measurement protocol**
+
+1. Record **p50/p95 latency** for 5–10 canonical queries.  
+2. Apply **one** high-confidence index or partition template.  
+3. **VACUUM/ANALYZE** as appropriate; replay load; compare.  
+4. Capture **EXPLAIN (ANALYZE, BUFFERS)** before/after screenshots for slides.
+
+If you only have **simulated** loads (e.g., `scripts/ml-optimization/run_ml_index_partition_workload.py`), state clearly: *“synthetic workload; results illustrate mechanism, not production SLAs.”*
+
+---
+
+## 9. Challenges & Trade-offs
+
+| Challenge | Impact | Mitigation |
+|-----------|--------|------------|
+| **Data drift** | Model trained on old workload underperforms on new apps. | Periodic retrain; monitor MAE; decay old logs. |
+| **Model retraining cost** | Training windows and feature drift. | Scheduled jobs; incremental data selection. |
+| **Optimization overhead** | Index builds lock I/O; `CONCURRENTLY` reduces but does not eliminate pain. | Maintenance windows; prioritize high-ROI. |
+| **Cold start** | Few logs → weak recommendations. | Bootstrap from pg_stat; seed workloads; lower evidence thresholds in dev only. |
+| **False positives** | Bad index suggestions. | Catalog validation + human approval + EXPLAIN checks. |
+
+---
+
+## 10. Future Improvements
+
+- **Autonomous schema evolution** with governance (approved migrations, versioned DDL).  
+- **RL-based optimizer** treating actions (add index / split partition) with reward = latency + dollar cost.  
+- **Cloud-native integration** (managed Postgres, object storage, serverless ETL).  
+- **Stronger streaming path** (CDC → bronze) for near–real-time marts.  
+- **Multi-tenant recommendation** policies (per team cost centers).
+
+---
+
+## 11. Demo Walkthrough Script (2–3 Minutes)
+
+**Opening (15 s)**  
+> “This is a PostgreSQL medallion warehouse with an ML layer that turns real query telemetry into ranked physical-design recommendations—indexes and partitions—instead of relying only on manual tuning.”
+
+**Architecture (30 s)**  
+> “Data moves bronze → silver → gold. PostgreSQL records how queries behave. A collector feeds `query_logs`. FastAPI loads trained models and merges rules so recommendations are both data-driven and safe for the catalog.”
+
+**ML punch (45 s)**  
+> “We use supervised regression to predict execution time from query features and runtime stats, plus anomaly detection for outliers, and clustering for workload families. That tells us *where* the pain is—not just *that* CPU is high.”
+
+**Live demo (45–60 s)**  
+1. Show **dashboard → Optimizations**: recommendations list with index vs. partition.  
+2. Open **one** recommendation: show **reason**, **estimated benefit**, and **DDL template**.  
+3. Optionally show **monitoring** (freshness, ETL) to connect “data quality” to “query behavior.”  
+4. Mention **human approval** before apply in production.
+
+**Closing (15 s)**  
+> “The innovation is the closed loop: observe → model → recommend → validate → retrain. That’s what makes the warehouse *self-optimizing* in a practical, engineering sense.”
+
+**Emphasize to the professor**
+
+- **Medallion + ML** = governance *and* intelligence.  
+- **Hybrid rules + ML** = safety *and* adaptivity.  
+- **Measurable** before/after on representative queries—even on a student-scale DB, the *method* is what you are graded on.
+
+---
+
+## 12. Quick Start (Operational Pointers)
+
+- Start API: `python start_services.py` (from project root; see script for route loading).  
+- Train models: `scripts/ml-optimization/train_all_models.py` (and related scripts).  
+- Collect logs: `scripts/ml-optimization/run_query_collection.py`.  
+- Stress / demo workload: `scripts/ml-optimization/run_ml_index_partition_workload.py`.
+
+---
+
+*This README is written for final-year engineering evaluation: it balances intuition, system thinking, and enough ML depth to defend design choices in Q&A.*

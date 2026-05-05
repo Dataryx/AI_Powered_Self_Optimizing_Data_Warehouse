@@ -5,6 +5,32 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
+/** HTTP origin (no /api/v1) — same base as REST. */
+export const API_ORIGIN = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
+
+/** WebSocket origin: VITE_WS_BASE_URL or inferred from VITE_API_BASE_URL (http→ws, https→wss). */
+export function getMlApiWebSocketOrigin(): string {
+  const override =
+    typeof import.meta.env.VITE_WS_BASE_URL === 'string' ? import.meta.env.VITE_WS_BASE_URL.trim() : '';
+  if (override) {
+    return override.replace(/\/+$/, '');
+  }
+  const http = API_ORIGIN.replace(/\/+$/, '');
+  if (http.startsWith('https://')) {
+    return `wss://${http.slice('https://'.length)}`;
+  }
+  if (http.startsWith('http://')) {
+    return `ws://${http.slice('http://'.length)}`;
+  }
+  return http;
+}
+
+/** e.g. path `ws/etl-jobs` → full ws://host/api/v1/ws/etl-jobs */
+export function mlApiWebSocketUrl(pathUnderApiV1: string): string {
+  const p = pathUnderApiV1.replace(/^\//, '');
+  return `${getMlApiWebSocketOrigin()}/api/v1/${p}`;
+}
+
 class ApiService {
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
@@ -160,18 +186,31 @@ class ApiService {
   }
 
   // Optimization endpoints
-  async getOptimizationRecommendations(type?: string, status?: string) {
+  async getOptimizationRecommendations(
+    type?: string,
+    status?: string,
+    limit: number = 100
+  ) {
     const params = new URLSearchParams();
     if (type) params.append('type', type);
     if (status) params.append('status', status);
+    params.append('limit', String(limit));
     const query = params.toString();
     return this.request(`/optimization/recommendations${query ? `?${query}` : ''}`);
   }
 
-  async applyOptimization(recommendationId: string, auto: boolean = false) {
-    return this.request(`/optimization/recommendations/${recommendationId}/apply`, {
+  async applyOptimization(
+    recommendationId: string,
+    auto: boolean = false,
+    snapshot?: Record<string, unknown>,
+  ) {
+    return this.request(`/optimization/recommendations/${encodeURIComponent(recommendationId)}/apply`, {
       method: 'POST',
-      body: JSON.stringify({ optimization_id: recommendationId, auto }),
+      body: JSON.stringify({
+        optimization_id: recommendationId,
+        auto,
+        ...(snapshot && Object.keys(snapshot).length > 0 ? { snapshot } : {}),
+      }),
     });
   }
 

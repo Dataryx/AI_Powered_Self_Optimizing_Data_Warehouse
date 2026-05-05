@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Compass,
   Radio,
@@ -18,7 +18,9 @@ import {
   Settings,
 } from 'lucide-react';
 import type { DashboardData } from '../hooks/useDashboardData';
+import { api } from '../services/api';
 import { formatLocalDate, formatLocalTime, formatLocalDateTime } from '../utils/time';
+import { hrefForDashboardAlert } from '../utils/alertNotificationNav';
 
 interface TopBarProps {
   data?: DashboardData | null;
@@ -71,6 +73,24 @@ function severityIcon(s: string) {
   return Info;
 }
 
+/** Same alert must keep the same key across polls (do not use array index). */
+function stableNotificationKey(raw: Record<string, unknown>): string {
+  const alertId = String(raw.alert_id ?? '').trim();
+  if (alertId) return alertId;
+  const id = String(raw.id ?? '').trim();
+  if (id) return id;
+  const title = String(raw.title ?? '');
+  const message = String(raw.message ?? '');
+  const ts = String(raw.timestamp ?? '');
+  const typ = String(raw.type ?? '');
+  const sev = String(raw.severity ?? '');
+  return `ctx:${title}|${message}|${ts}|${typ}|${sev}`;
+}
+
+function canAcknowledgeOnServer(key: string): boolean {
+  return Boolean(key) && !key.startsWith('ctx:');
+}
+
 const mobileNav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/monitoring', label: 'Monitoring', icon: Activity },
@@ -82,58 +102,59 @@ const mobileNav = [
 ] as const;
 
 export default function TopBar({ data = null, loading = false, connectionError = null }: TopBarProps) {
+  const navigate = useNavigate();
   const [time, setTime] = useState(new Date());
   const [open, setOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [readAlertKeys, setReadAlertKeys] = useState<string[]>([]);
 
-  const READ_ALERTS_STORAGE_KEY = 'dashboard_read_alert_keys_v1';
   useEffect(() => {
     const id = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(READ_ALERTS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        setReadAlertKeys(parsed.filter((v) => typeof v === 'string'));
-      }
-    } catch {
-      // Ignore parse/storage errors.
-    }
-  }, []);
-
   const rawAlerts = Array.isArray(data?.alerts?.alerts) ? data.alerts.alerts : [];
-  const alerts = rawAlerts.map((a, idx) => {
+  const alerts = rawAlerts.map((a) => {
+    const raw = a as Record<string, unknown>;
     const severity = a?.severity ?? a?.type ?? 'info';
-    const key = `${a?.title ?? ''}|${a?.message ?? ''}|${a?.timestamp ?? ''}|${severity}|${idx}`;
+    const key = stableNotificationKey(raw);
     return {
       key,
       severity,
-      color: severityColor(severity),
-      icon: severityIcon(severity),
+      color: severityColor(String(severity)),
+      icon: severityIcon(String(severity)),
       message: (a?.message ?? a?.title ?? 'Alert').toString(),
       time: formatTimeAgo(a?.timestamp),
+      timestamp: typeof a?.timestamp === 'string' ? a.timestamp : undefined,
+      href: hrefForDashboardAlert(raw),
     };
   });
-  const unreadCount = useMemo(
-    () => alerts.filter((a) => !readAlertKeys.includes(a.key)).length,
-    [alerts, readAlertKeys]
-  );
+  const unreadCount = useMemo(() => {
+    if (alerts.length === 0) return 0;
+    return alerts.filter((a) => !readAlertKeys.includes(a.key)).length;
+  }, [alerts, readAlertKeys]);
 
   const gatewayReachable = hasGatewayData(data);
   const live = !loading && gatewayReachable && !connectionError;
 
   const markAllAsRead = () => {
-    const next = Array.from(new Set([...readAlertKeys, ...alerts.map((a) => a.key)]));
+    const keys = alerts.map((a) => a.key);
+    const toAck = keys.filter((k) => !readAlertKeys.includes(k) && canAcknowledgeOnServer(k));
+    const next = Array.from(new Set([...readAlertKeys, ...keys]));
     setReadAlertKeys(next);
-    try {
-      localStorage.setItem(READ_ALERTS_STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // Ignore storage errors.
+    if (toAck.length > 0) {
+      void api.acknowledgeAlertsBatch(toAck).catch(() => {
+        // Server may be offline; local read state still applies for the badge.
+      });
+    }
+  };
+
+  const markOneRead = (key: string) => {
+    if (readAlertKeys.includes(key)) return;
+    const next = [...readAlertKeys, key];
+    setReadAlertKeys(next);
+    if (canAcknowledgeOnServer(key)) {
+      void api.acknowledgeAlert(key).catch(() => {});
     }
   };
 
@@ -194,22 +215,31 @@ export default function TopBar({ data = null, loading = false, connectionError =
                 {!loading && alerts.length === 0 && (
                   <div className="py-8 text-center font-mono text-[11px] text-[#5a6a8a]">No alerts</div>
                 )}
-                {alerts.map((a, i) => {
+                {alerts.map((a) => {
                   const Icon = a.icon;
                   return (
-                    <div key={a.key} className="p-2.5 rounded-lg border border-[#1e2540] bg-[#0c0f1a] mb-2 last:mb-0">
+                    <button
+                      key={a.key}
+                      type="button"
+                      onClick={() => {
+                        markOneRead(a.key);
+                        setOpen(false);
+                        navigate(a.href);
+                      }}
+                      className="w-full text-left p-2.5 rounded-lg border border-[#1e2540] bg-[#0c0f1a] mb-2 last:mb-0 hover:border-[#2a3555] hover:bg-[#12182a] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecfff40]"
+                    >
                       <div className="flex items-start gap-2.5">
-                        <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: `${a.color}1A` }}>
+                        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: `${a.color}1A` }}>
                           <Icon size={12} style={{ color: a.color }} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-body text-xs text-[#c0cde0] leading-snug">{a.message}</p>
                           <span className="font-mono text-[10px] text-[#4a5a7a]">
-                            {a?.time === '—' ? formatLocalDateTime(a?.timestamp) : a.time}
+                            {a?.time === '—' && a.timestamp ? formatLocalDateTime(a.timestamp) : a.time}
                           </span>
                         </div>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>

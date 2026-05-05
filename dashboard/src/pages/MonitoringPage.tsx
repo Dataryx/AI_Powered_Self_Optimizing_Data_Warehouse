@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import SidebarPageShell from '../components/SidebarPageShell';
 import MonitoringHeader from '../components/monitoring/MonitoringHeader';
 import ETLStats from '../components/monitoring/ETLStats';
@@ -11,11 +13,21 @@ import { Satellite } from 'lucide-react';
 import { useMonitoringData } from '../hooks/useMonitoringData';
 
 export default function MonitoringPage() {
-  const { data, loading, error, refetch } = useMonitoringData();
+  const { data, loading, refreshing, error, refetch } = useMonitoringData();
+  const location = useLocation();
+
+  useEffect(() => {
+    const id = location.hash.replace(/^#/, '');
+    if (!id) return;
+    const t = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+    return () => clearTimeout(t);
+  }, [location.hash, location.pathname, loading]);
 
   return (
     <SidebarPageShell className="bg-[#0a0d18]">
-      <MonitoringHeader />
+      <MonitoringHeader refreshing={refreshing} />
       <main className="flex-1 px-4 sm:px-6 lg:px-8 py-5 max-w-7xl mx-auto w-full relative">
           {/* Ambient background */}
           <div className="fixed inset-0 pointer-events-none z-0" style={{
@@ -40,31 +52,48 @@ export default function MonitoringPage() {
 
             {error && (
               <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-mono">
-                {error} — <button type="button" onClick={refetch} className="underline">Retry</button>
+                {error} —{' '}
+                <button type="button" onClick={() => void refetch()} className="underline">
+                  Retry
+                </button>
               </div>
             )}
             {/* Stats row */}
             <ETLStats data={data} loading={loading} />
 
             {/* Lineage */}
-            <div className="mt-6">
+            <div id="monitoring-lineage" className="mt-6 scroll-mt-24">
               <LineageVisualization data={data} loading={loading} />
             </div>
 
             {/* Recent ETL Runs + Throughput */}
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+            <div id="monitoring-etl" className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6 scroll-mt-24">
               <RecentETLRuns data={data} loading={loading} onRefetch={refetch} />
-              <ManualETLJobRunner jobs={data.jobs} jobsLoading={loading} onAfterDispatch={refetch} />
+              <ManualETLJobRunner
+                jobs={data.jobs}
+                jobsLoading={loading}
+                jobDefinitions={data.jobDefinitions}
+                definitionsLoading={loading}
+                onAfterDispatch={refetch}
+              />
             </div>
 
             {/* Data Freshness & SLA */}
-            <div className="mt-6">
-              <DataFreshness data={data} loading={loading} onRefetch={refetch} />
+            <div id="monitoring-freshness" className="mt-6 scroll-mt-24">
+              <DataFreshness
+                data={data}
+                loading={loading || data.freshness === undefined}
+                onRefetch={refetch}
+              />
             </div>
 
             {/* Data Quality */}
-            <div className="mt-6">
-              <DataQuality data={data} loading={loading} onRefetch={refetch} />
+            <div id="monitoring-data-quality" className="mt-6 scroll-mt-24">
+              <DataQuality
+                data={data}
+                loading={loading || data.dataQuality === undefined}
+                onRefetch={refetch}
+              />
             </div>
           </div>
         </main>

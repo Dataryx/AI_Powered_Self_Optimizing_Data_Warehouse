@@ -3,20 +3,19 @@
  * Execution time analysis with baseline explanation - Advisory only
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React from 'react';
 import {
   Card,
   CardContent,
   Typography,
   Box,
-  Chip,
   Select,
   MenuItem,
   FormControl,
   InputLabel,
   Paper,
 } from '@mui/material';
-import { Speed, TrendingUp, Info } from '@mui/icons-material';
+import { Speed, Info } from '@mui/icons-material';
 import {
   LineChart,
   Line,
@@ -27,8 +26,6 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
-import { apiService } from '../../services/api';
-
 interface QueryMetric {
   query_id: string;
   query_hash: string;
@@ -43,42 +40,21 @@ interface QueryMetric {
 }
 
 interface QueryPerformanceProps {
-  refreshKey?: number;
+  performanceMetrics: QueryMetric[] | null;
+  error: string | null;
+  loading: boolean;
+  timeRange: string;
+  onTimeRangeChange: (value: string) => void;
 }
 
 export const QueryPerformance: React.FC<QueryPerformanceProps> = ({
-  refreshKey = 0,
+  performanceMetrics,
+  error,
+  loading,
+  timeRange,
+  onTimeRangeChange,
 }) => {
-  const [metrics, setMetrics] = useState<QueryMetric[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState('7');
-
-  const fetchMetrics = useCallback(async () => {
-    try {
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - parseInt(timeRange));
-
-      const data = await apiService.getQueryPerformance(
-        startDate.toISOString().split('T')[0],
-        endDate.toISOString().split('T')[0],
-        undefined,
-        100
-      );
-      setMetrics(data.metrics || data.data?.metrics || []);
-      setLoading(false);
-    } catch (err) {
-      console.error('Error fetching query performance:', err);
-      setMetrics([]);
-      setLoading(false);
-    }
-  }, [timeRange]);
-
-  useEffect(() => {
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 30000);
-    return () => clearInterval(interval);
-  }, [fetchMetrics, refreshKey]);
+  const metrics: QueryMetric[] = (performanceMetrics ?? []) as QueryMetric[];
 
   // Calculate baseline (rolling median)
   const calculateBaseline = () => {
@@ -159,7 +135,7 @@ export const QueryPerformance: React.FC<QueryPerformanceProps> = ({
             <Select
               value={timeRange}
               label="Time Range"
-              onChange={(e) => setTimeRange(e.target.value)}
+              onChange={(e) => onTimeRangeChange(e.target.value)}
               sx={{
                 fontSize: '0.875rem',
                 '& .MuiOutlinedInput-notchedOutline': {
@@ -173,6 +149,12 @@ export const QueryPerformance: React.FC<QueryPerformanceProps> = ({
             </Select>
           </FormControl>
         </Box>
+
+        {error && (
+          <Typography variant="caption" sx={{ color: '#b91c1c', display: 'block', mb: 2 }}>
+            {error}
+          </Typography>
+        )}
 
         {loading ? (
           <Box sx={{ textAlign: 'center', py: 6 }}>

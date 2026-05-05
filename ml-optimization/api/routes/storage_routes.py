@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 @router.get("/utilization")
-async def get_storage_utilization():
+def get_storage_utilization():
     """Get storage utilization by layer and table."""
     try:
         with get_db_connection() as conn:
@@ -26,17 +26,23 @@ async def get_storage_utilization():
             total_size_bytes = 0
             
             for schema in ['bronze', 'silver', 'gold']:
-                cursor.execute("""
-                    SELECT 
-                        tablename,
-                        pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size_pretty,
-                        pg_total_relation_size(schemaname||'.'||tablename) as size_bytes,
-                        pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) as table_size,
-                        pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) as index_size
-                    FROM pg_tables
-                    WHERE schemaname = %s
-                    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
-                """, (schema,))
+                cursor.execute(
+                    """
+                    SELECT
+                        c.relname AS tablename,
+                        c.oid::bigint AS relation_oid,
+                        pg_size_pretty(pg_total_relation_size(c.oid)) AS size_pretty,
+                        pg_total_relation_size(c.oid) AS size_bytes,
+                        pg_size_pretty(pg_relation_size(c.oid)) AS table_size,
+                        pg_size_pretty(pg_total_relation_size(c.oid) - pg_relation_size(c.oid)) AS index_size
+                    FROM pg_catalog.pg_class c
+                    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = %s
+                      AND c.relkind IN ('r', 'p', 'm')
+                    ORDER BY pg_total_relation_size(c.oid) DESC
+                    """,
+                    (schema,),
+                )
                 
                 tables = cursor.fetchall()
                 table_utilization = []
@@ -47,8 +53,10 @@ async def get_storage_utilization():
                     schema_total += size_bytes
                     total_size_bytes += size_bytes
                     
+                    roid = table.get("relation_oid")
                     table_utilization.append({
                         "table": table.get('tablename', ''),
+                        "relation_oid": int(roid) if roid is not None else None,
                         "total_size": table.get('size_pretty', '0 B'),
                         "size_bytes": size_bytes,
                         "table_size": table.get('table_size', '0 B'),
@@ -84,7 +92,7 @@ async def get_storage_utilization():
 
 
 @router.get("/growth-trends")
-async def get_growth_trends(days: int = Query(30, description="Number of days to analyze")):
+def get_growth_trends(days: int = Query(30, description="Number of days to analyze")):
     """Get data growth trends over time."""
     try:
         with get_db_connection() as conn:
@@ -150,7 +158,7 @@ async def get_growth_trends(days: int = Query(30, description="Number of days to
 
 
 @router.get("/compression")
-async def get_compression_stats():
+def get_compression_stats():
     """Get compression ratio statistics."""
     try:
         with get_db_connection() as conn:
@@ -218,7 +226,7 @@ async def get_compression_stats():
 
 
 @router.get("/cache")
-async def get_cache_performance():
+def get_cache_performance():
     """Get cache performance metrics."""
     try:
         with get_db_connection() as conn:
@@ -282,7 +290,7 @@ async def get_cache_performance():
 
 
 @router.get("/resources")
-async def get_resource_allocation():
+def get_resource_allocation():
     """Get resource allocation history."""
     try:
         with get_db_connection() as conn:
@@ -320,7 +328,7 @@ async def get_resource_allocation():
 
 
 @router.get("/cost")
-async def get_cost_tracking():
+def get_cost_tracking():
     """Get cost tracking information."""
     try:
         with get_db_connection() as conn:

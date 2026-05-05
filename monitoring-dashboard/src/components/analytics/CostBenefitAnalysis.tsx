@@ -14,8 +14,6 @@ import {
 } from '@mui/material';
 import { Refresh, AttachMoney, TrendingUp, Savings } from '@mui/icons-material';
 import {
-  LineChart,
-  Line,
   AreaChart,
   Area,
   XAxis,
@@ -34,43 +32,32 @@ interface CostBenefitAnalysisProps {
 export const CostBenefitAnalysis: React.FC<CostBenefitAnalysisProps> = ({ refreshKey = 0 }) => {
   const [analysis, setAnalysis] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   const fetchAnalysis = useCallback(async () => {
     try {
-      const costData = await apiService.getCostTracking();
-      
-      // Process data for analysis
-      const layers = costData.layers || {};
-      const totalMonthlyCost = costData.total_monthly_cost || 0;
-      
-      // Generate ROI trend (mock data based on optimizations)
-      const roiTrend = Array.from({ length: 12 }, (_, i) => {
-        const month = new Date();
-        month.setMonth(month.getMonth() - (11 - i));
-        return {
-          month: month.toLocaleDateString('en-US', { month: 'short' }),
-          cost: totalMonthlyCost * (1 - (i * 0.02)),
-          savings: totalMonthlyCost * (i * 0.02),
-          roi: (i * 5) + 10,
-        };
-      });
+      const costData = (await apiService.getCostTracking()) as {
+        layers?: Record<string, { monthly_cost?: number }>;
+        total_monthly_cost?: number;
+      };
 
-      const totalSavings = roiTrend[roiTrend.length - 1].savings;
-      const currentROI = roiTrend[roiTrend.length - 1].roi;
+      const layers = costData.layers || {};
+      const totalMonthlyCost = Number(costData.total_monthly_cost) || 0;
+      const roiTrend: Array<{ month: string; cost: number; savings: number; roi: number }> = [];
 
       setAnalysis({
         totalMonthlyCost,
-        totalSavings,
-        currentROI,
+        totalSavings: 0,
+        currentROI: 0,
         roiTrend,
         layerBreakdown: Object.keys(layers).map((layer) => ({
           layer,
           cost: layers[layer].monthly_cost || 0,
-          percentage: ((layers[layer].monthly_cost || 0) / totalMonthlyCost) * 100,
+          percentage:
+            totalMonthlyCost > 0
+              ? ((layers[layer].monthly_cost || 0) / totalMonthlyCost) * 100
+              : 0,
         })),
       });
-      setLastUpdate(new Date());
       setLoading(false);
     } catch (err) {
       console.error('Error fetching cost benefit analysis:', err);
@@ -137,7 +124,7 @@ export const CostBenefitAnalysis: React.FC<CostBenefitAnalysisProps> = ({ refres
                 Optimization Impact (ROI)
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                ROI and savings from applied optimizations
+                Monthly cost from the API; ROI trend only when time-series data is available
               </Typography>
               <Typography
                 variant="caption"
@@ -148,27 +135,7 @@ export const CostBenefitAnalysis: React.FC<CostBenefitAnalysisProps> = ({ refres
                   mt: 0.25,
                 }}
               >
-                Metrics reflect the impact of applied optimizations.
-              </Typography>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: '#94a3b8',
-                  fontSize: '0.7rem',
-                  display: 'block',
-                }}
-              >
-                Baseline derived from pre-optimization performance metrics.
-              </Typography>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: '#94a3b8',
-                  fontSize: '0.7rem',
-                  display: 'block',
-                }}
-              >
-                Compared to pre-optimization baseline.
+                Cost figures come from the cost-tracking API only.
               </Typography>
             </Box>
           </Box>
@@ -206,30 +173,34 @@ export const CostBenefitAnalysis: React.FC<CostBenefitAnalysisProps> = ({ refres
                 height: '20px',
               }}
             />
-            <Chip
-              icon={<Savings sx={{ fontSize: 12 }} />}
-              label={`$${analysis.totalSavings.toFixed(2)} saved`}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                color: '#10b981',
-                fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
-              }}
-            />
-            <Chip
-              icon={<TrendingUp sx={{ fontSize: 12 }} />}
-              label={`${analysis.currentROI.toFixed(1)}% ROI`}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                color: '#6366f1',
-                fontWeight: 600,
-                fontSize: '0.7rem',
-                height: '20px',
-              }}
-            />
+            {analysis.roiTrend.length > 0 && (
+              <>
+                <Chip
+                  icon={<Savings sx={{ fontSize: 12 }} />}
+                  label={`$${analysis.totalSavings.toFixed(2)} saved`}
+                  size="small"
+                  sx={{
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    color: '#10b981',
+                    fontWeight: 600,
+                    fontSize: '0.7rem',
+                    height: '20px',
+                  }}
+                />
+                <Chip
+                  icon={<TrendingUp sx={{ fontSize: 12 }} />}
+                  label={`${analysis.currentROI.toFixed(1)}% ROI`}
+                  size="small"
+                  sx={{
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    color: '#6366f1',
+                    fontWeight: 600,
+                    fontSize: '0.7rem',
+                    height: '20px',
+                  }}
+                />
+              </>
+            )}
           </Box>
         )}
 

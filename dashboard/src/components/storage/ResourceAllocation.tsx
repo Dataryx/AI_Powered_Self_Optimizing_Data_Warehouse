@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion';
 import { RefreshCw, Server } from 'lucide-react';
 
 interface ResourceAllocationProps { data?: any; loading?: boolean }

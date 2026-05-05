@@ -56,6 +56,28 @@ class TestOptimizationEndpoints:
         """Test getting optimization history."""
         response = requests.get(f"{api_base_url}/optimization/history")
         assert response.status_code == 200
+        data = response.json()
+        assert "metadata" in data
+        assert "contract_version" in data["metadata"]
+
+    def test_analytics_dashboard_bundle_contract(self, api_base_url):
+        """Analytics bundle includes contract metadata and key sections."""
+        response = requests.get(f"{api_base_url}/optimization/analytics-dashboard-bundle")
+        assert response.status_code == 200
+        data = response.json()
+        for k in ("queryPerformance1d", "queryPerformance7d", "queryPerformance30d", "optimizationHistory", "recommendations", "metadata"):
+            assert k in data
+        assert "contract_version" in data["metadata"]
+
+    def test_query_performance_contract(self, api_base_url):
+        """Query performance endpoint returns metadata contract."""
+        response = requests.get(f"{api_base_url}/optimization/query-performance")
+        assert response.status_code == 200
+        data = response.json()
+        assert "queries" in data
+        assert "metadata" in data
+        for k in ("degraded_mode", "degraded_reason", "contract_version"):
+            assert k in data["metadata"]
 
 
 class TestMonitoringEndpoints:
