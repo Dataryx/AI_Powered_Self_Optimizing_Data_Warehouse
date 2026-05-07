@@ -2,44 +2,65 @@ import { motion } from 'framer-motion';
 import { Database, Table2, ShoppingCart, DollarSign, TrendingUp, Users } from 'lucide-react';
 import type { DashboardData } from '../hooks/useDashboardData';
 
-const DEFAULT_METRICS = [
-  { label: 'Total Records', value: '224,161,810', icon: Database, color: '#3ecfff', change: '+2.4%' },
-  { label: 'Total Tables', value: '46', icon: Table2, color: '#818cf8', change: '+0' },
-  { label: 'Total Sales', value: '15,046,325', icon: ShoppingCart, color: '#34d399', change: '+5.1%' },
-  { label: 'Total Revenue', value: '$399.5B', icon: DollarSign, color: '#fbbf24', change: '+3.8%' },
-  { label: 'Avg Sale Value', value: '$26,553.04', icon: TrendingUp, color: '#f87171', change: '+1.2%' },
-  { label: 'Total Customers', value: '150,000', icon: Users, color: '#f59e0b', change: '+4.7%' },
-];
+type MetricCard = {
+  label: string;
+  value: string;
+  icon: typeof Database;
+  color: string;
+  change?: string | null;
+};
+
+function fmtInt(v: number | null): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return Math.round(v).toLocaleString();
+}
 
 function formatRevenue(n: number): string {
+  if (!Number.isFinite(n)) return '—';
   if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
   if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
   if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
   return `$${n.toFixed(0)}`;
 }
 
-function buildMetrics(data: DashboardData | null): typeof DEFAULT_METRICS {
-  if (!data?.summary?.warehouse_summary && !data?.sales && !data?.customers) {
-    return DEFAULT_METRICS;
-  }
-  const ws = data.summary?.warehouse_summary;
-  const totalRows =
-    (ws?.bronze?.estimated_rows ?? 0) + (ws?.silver?.estimated_rows ?? 0) + (ws?.gold?.estimated_rows ?? 0);
-  const totalTables =
-    (ws?.bronze?.table_count ?? 0) + (ws?.silver?.table_count ?? 0) + (ws?.gold?.table_count ?? 0);
-  const ts = data.sales?.total_sales;
-  const count = ts?.count ?? 15046325;
-  const revenue = ts?.revenue ?? 399500000000;
-  const avgSale = ts?.avg_sale ?? revenue / count;
-  const customers = data.customers?.total_customers ?? 150000;
+function buildMetrics(data: DashboardData | null): MetricCard[] {
+  const ws = data?.summary?.warehouse_summary;
+  const hasWarehouseRows = Boolean(ws?.bronze || ws?.silver || ws?.gold);
+  const totalRows = hasWarehouseRows
+    ? (ws?.bronze?.estimated_rows ?? 0) + (ws?.silver?.estimated_rows ?? 0) + (ws?.gold?.estimated_rows ?? 0)
+    : null;
+  const totalTables = hasWarehouseRows
+    ? (ws?.bronze?.table_count ?? 0) + (ws?.silver?.table_count ?? 0) + (ws?.gold?.table_count ?? 0)
+    : null;
+  const ts = data?.sales?.total_sales;
+  const count = typeof ts?.count === 'number' && Number.isFinite(ts.count) ? ts.count : null;
+  const revenue = typeof ts?.revenue === 'number' && Number.isFinite(ts.revenue) ? ts.revenue : null;
+  const avgSale =
+    typeof ts?.avg_sale === 'number' && Number.isFinite(ts.avg_sale)
+      ? ts.avg_sale
+      : count != null && count > 0 && revenue != null
+        ? revenue / count
+        : null;
+  const customersRaw = data?.customers?.total_customers;
+  const customers =
+    typeof customersRaw === 'number' && Number.isFinite(customersRaw) ? customersRaw : null;
 
   return [
-    { label: 'Total Records', value: totalRows ? totalRows.toLocaleString() : DEFAULT_METRICS[0].value, icon: Database, color: '#3ecfff', change: '+2.4%' },
-    { label: 'Total Tables', value: totalTables ? String(totalTables) : DEFAULT_METRICS[1].value, icon: Table2, color: '#818cf8', change: '+0' },
-    { label: 'Total Sales', value: count.toLocaleString(), icon: ShoppingCart, color: '#34d399', change: '+5.1%' },
-    { label: 'Total Revenue', value: formatRevenue(revenue), icon: DollarSign, color: '#fbbf24', change: '+3.8%' },
-    { label: 'Avg Sale Value', value: `$${avgSale.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: TrendingUp, color: '#f87171', change: '+1.2%' },
-    { label: 'Total Customers', value: customers.toLocaleString(), icon: Users, color: '#f59e0b', change: '+4.7%' },
+    { label: 'Total Records', value: fmtInt(totalRows), icon: Database, color: '#3ecfff', change: null },
+    { label: 'Total Tables', value: fmtInt(totalTables), icon: Table2, color: '#818cf8', change: null },
+    { label: 'Total Sales', value: fmtInt(count), icon: ShoppingCart, color: '#34d399', change: null },
+    { label: 'Total Revenue', value: revenue != null ? formatRevenue(revenue) : '—', icon: DollarSign, color: '#fbbf24', change: null },
+    {
+      label: 'Avg Sale Value',
+      value:
+        avgSale != null
+          ? `$${avgSale.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : '—',
+      icon: TrendingUp,
+      color: '#f87171',
+      change: null,
+    },
+    { label: 'Total Customers', value: fmtInt(customers), icon: Users, color: '#f59e0b', change: null },
   ];
 }
 
@@ -84,7 +105,11 @@ export default function KeyMetrics({ data = null, loading = false }: KeyMetricsP
                 </div>
                 <p className="font-body text-xl font-bold text-[#e0e8f5] leading-tight tracking-tight">{m.value}</p>
                 <p className="font-mono text-[10px] text-[#4a5a7a] mt-1 tracking-wider uppercase">{m.label}</p>
-                <span className="inline-block mt-2 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-md" style={{ color: m.color, background: `${m.color}12` }}>{m.change}</span>
+                {m.change ? (
+                  <span className="inline-block mt-2 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-md" style={{ color: m.color, background: `${m.color}12` }}>
+                    {m.change}
+                  </span>
+                ) : null}
               </motion.div>
             );
           })}

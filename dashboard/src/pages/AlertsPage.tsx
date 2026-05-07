@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft,
@@ -378,15 +378,12 @@ const tabs: { id: AlertsTab; label: string; desc: string; icon: typeof Inbox }[]
 export default function AlertsPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { data, loading, error, refetch } = useAlertsData();
+  const { data, loading, error, refetch, lastUpdatedAt } = useAlertsData();
   const meta = data?.meta;
   const activeAlerts = Array.isArray(data?.alerts) ? data.alerts : [];
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [ackBusy, setAckBusy] = useState<string | null>(null);
   const [ackAllBusy, setAckAllBusy] = useState(false);
   const [ackError, setAckError] = useState<string | null>(null);
-  const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
-  const prevLoading = useRef(loading);
   const [tab, setTab] = useState<AlertsTab>(() =>
     typeof window !== 'undefined' ? alertsTabFromHash(window.location.hash) : 'inbox',
   );
@@ -407,26 +404,11 @@ export default function AlertsPage() {
   const [incPage, setIncPage] = useState(1);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (prevLoading.current && !loading) {
-      setLastFetchedAt(new Date());
-    }
-    prevLoading.current = loading;
-  }, [loading]);
-
   const anomalies = Array.isArray(data?.anomalies) ? data.anomalies : [];
   const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
   const bySeverity = meta?.active?.by_severity ?? {};
 
-  const visibleAlerts = useMemo(
-    () =>
-      activeAlerts.filter((a: { alert_id?: string }) => {
-        const id = String(a?.alert_id ?? '');
-        if (!id) return true;
-        return !dismissedIds.has(id);
-      }),
-    [activeAlerts, dismissedIds],
-  );
+  const visibleAlerts = activeAlerts;
 
   const ackableAlertIds = useMemo(() => {
     const ids = new Set<string>();
@@ -466,7 +448,6 @@ export default function AlertsPage() {
       setAckBusy(alertId);
       try {
         await api.acknowledgeAlert(alertId);
-        setDismissedIds((prev) => new Set(prev).add(alertId));
         await refetch();
       } catch (e) {
         setAckError(e instanceof Error ? e.message : 'Acknowledge failed');
@@ -483,11 +464,6 @@ export default function AlertsPage() {
     setAckAllBusy(true);
     try {
       await api.acknowledgeAlertsBatch(ackableAlertIds);
-      setDismissedIds((prev) => {
-        const next = new Set(prev);
-        ackableAlertIds.forEach((id) => next.add(id));
-        return next;
-      });
       setInboxPage(1);
       setExpandedKey(null);
       await refetch();
@@ -580,9 +556,9 @@ export default function AlertsPage() {
           </p> */}
           <p className="font-mono text-[10px] text-[#5a6a8a] mt-2 ml-0 sm:ml-10 tabular-nums">
             Last loaded{' '}
-            {lastFetchedAt ? (
-              <time dateTime={lastFetchedAt.toISOString()} className="text-[#8a9aaa]">
-                {formatLocalTime(lastFetchedAt)}
+            {lastUpdatedAt != null ? (
+              <time dateTime={new Date(lastUpdatedAt).toISOString()} className="text-[#8a9aaa]">
+                {formatLocalTime(lastUpdatedAt)}
               </time>
             ) : (
               '—'

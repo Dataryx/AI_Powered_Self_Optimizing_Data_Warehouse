@@ -2,9 +2,9 @@
  * Single WebSocket stream for optimization snapshots + HTTP prefetch / polling fallback.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, buildOptimizationStreamWebSocketUrl } from '../services/api';
-import { normalizeQueryPerformance, utcPerformanceDateRange } from '../utils/queryPerformance';
+import { normalizeQueryPerformance } from '../utils/queryPerformance';
 
 type OptimizationRecommendationsPayload = {
   recommendations?: unknown[];
@@ -66,21 +66,11 @@ export function useOptimizationRealtimeWebSocket(
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
 
-  const performanceRange = useMemo(
-    () => utcPerformanceDateRange(performanceDays),
-    [performanceDays],
-  );
-
   const fetchSnapshotViaHttp = useCallback(async (): Promise<OptimizationSnapshot> => {
     const recCap = Math.min(Math.max(recommendationsLimit * 2, recommendationsLimit), 250);
-    const [combinedRecs, historyRes, perfRes] = await Promise.all([
+    const [combinedRecs, historyRes] = await Promise.all([
       api.getOptimizationRecommendations(undefined, 'pending', recCap),
       api.getOptimizationHistory(historyLimit),
-      api.getQueryPerformance({
-        start_date: performanceRange.startDate,
-        end_date: performanceRange.endDate,
-        limit: performanceLimit,
-      }),
     ]);
 
     const all = Array.isArray((combinedRecs as { recommendations?: unknown[] })?.recommendations)
@@ -108,19 +98,17 @@ export function useOptimizationRealtimeWebSocket(
         debug,
       },
       history: historyRes as OptimizationHistoryPayload,
-      performance: perfRes as QueryPerformancePayload,
+      performance: { metrics: [], queries: [] } as QueryPerformancePayload,
       debug,
     };
-  }, [
-    performanceLimit,
-    performanceRange.endDate,
-    performanceRange.startDate,
-    recommendationsLimit,
-    historyLimit,
-  ]);
+  }, [recommendationsLimit, historyLimit]);
 
   useEffect(() => {
     let cancelled = false;
+    // Invalidate previous snapshot so Query Performance / recommendations do not show stale rows
+    // while a new window (performanceDays) or refresh refetches.
+    setSnapshot(null);
+    setLastUpdate(null);
 
     // Load recommendations immediately via REST — do not wait on WebSocket (WS can be slow or stall
     // while the socket stays "open" before the first frame, which left the UI stuck on loading).
@@ -241,8 +229,15 @@ export function useOptimizationRealtimeWebSocket(
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.close();
+      const w = wsRef.current;
+      if (w) {
+        // Prevent stale onclose handlers from reconnecting with an old performance_days URL
+        // after the time-period filter (or refresh) tears down this effect.
+        w.onclose = null;
+        if (w.readyState === WebSocket.OPEN || w.readyState === WebSocket.CONNECTING) {
+          w.close();
+        }
+        wsRef.current = null;
       }
     };
   }, [

@@ -102,12 +102,6 @@ function pickRecommendations(b: Record<string, unknown>): unknown {
   return b.recommendation_list;
 }
 
-function readAnalyticsPollMs(): number {
-  const raw = typeof import.meta.env.VITE_ANALYTICS_POLL_MS === 'string' ? import.meta.env.VITE_ANALYTICS_POLL_MS.trim() : '';
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n >= 5000 ? n : 0;
-}
-
 function parseAnalyticsMeta(raw: unknown): AnalyticsContractMeta {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const asStr = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null);
@@ -180,18 +174,18 @@ export function useAnalyticsData() {
           performanceDaysLong: retentionDays,
         })) as Record<string, unknown>;
       } catch {
-        // Fallback: older single-page bundle (one query-performance list for all windows).
+        // Fallback: older single-page bundle. Do NOT mirror one window into 1d/7d/30d slices,
+        // because analytics timeline views require distinct real windows.
         const page = (await api.getAnalyticsPageBundle()) as Record<string, unknown>;
-        const qp = page.queryPerformance;
         b = {
-          queryPerformance1d: qp,
-          queryPerformance7d: qp,
-          queryPerformance30d: qp,
+          queryPerformance1d: [],
+          queryPerformance7d: [],
+          queryPerformance30d: [],
           optimizationHistory: page.optimizationHistory,
           recommendations: page.recommendations,
           metadata: {
             degraded_mode: true,
-            degraded_reason: 'dashboard_bundle_failed_using_legacy_bundle',
+            degraded_reason: 'dashboard_bundle_failed_no_distinct_query_windows_available',
           },
         };
       }
@@ -271,31 +265,6 @@ export function useAnalyticsData() {
 
   useEffect(() => {
     void fetchAll();
-  }, [fetchAll]);
-
-  useEffect(() => {
-    const pollMs = readAnalyticsPollMs();
-    if (pollMs <= 0) return;
-    const id = window.setInterval(() => {
-      void fetchAll();
-    }, pollMs);
-    return () => window.clearInterval(id);
-  }, [fetchAll]);
-
-  useEffect(() => {
-    let t: ReturnType<typeof setTimeout> | undefined;
-    const onVis = () => {
-      if (document.visibilityState !== 'visible') return;
-      window.clearTimeout(t);
-      t = window.setTimeout(() => {
-        void fetchAll();
-      }, 600);
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      document.removeEventListener('visibilitychange', onVis);
-      window.clearTimeout(t);
-    };
   }, [fetchAll]);
 
   return { data, loading, error, refetch: fetchAll, lastUpdatedAt, contractMeta, sectionHealth };

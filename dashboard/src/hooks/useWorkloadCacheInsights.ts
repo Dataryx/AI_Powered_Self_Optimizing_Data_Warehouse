@@ -9,7 +9,7 @@ const WORKLOAD_CLUSTER_SAMPLE = 5000;
 /** Rows scanned to rank cache templates; candidate list length and probability floor. */
 const CACHE_LOGS_LIMIT = 8000;
 const CACHE_LIST_LIMIT = 25;
-const CACHE_THRESHOLD = 0.45;
+const CACHE_THRESHOLD = 0;
 
 export function useWorkloadCacheInsights() {
   const [workload, setWorkload] = useState<WorkloadClustersPayload | null>(null);

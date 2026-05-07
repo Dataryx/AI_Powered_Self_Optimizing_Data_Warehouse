@@ -6,19 +6,16 @@ import type { DashboardData } from '../hooks/useDashboardData';
 import { hrefForDashboardAlert } from '../utils/alertNotificationNav';
 
 function formatTimeAgo(iso: string): string {
-  try {
-    const d = new Date(iso);
-    const now = Date.now();
-    const diff = Math.floor((now - d.getTime()) / 60000);
-    if (diff < 1) return 'Just now';
-    if (diff < 60) return `${diff} min ago`;
-    const h = Math.floor(diff / 60);
-    if (h < 24) return `${h} hr ago`;
-    const day = Math.floor(h / 24);
-    return `${day} day${day > 1 ? 's' : ''} ago`;
-  } catch {
-    return '';
-  }
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '—';
+  const now = Date.now();
+  const diff = Math.floor((now - t) / 60000);
+  if (diff < 1) return 'Just now';
+  if (diff < 60) return `${diff} min ago`;
+  const h = Math.floor(diff / 60);
+  if (h < 24) return `${h} hr ago`;
+  const day = Math.floor(h / 24);
+  return `${day} day${day > 1 ? 's' : ''} ago`;
 }
 
 function severityColor(s: string): string {

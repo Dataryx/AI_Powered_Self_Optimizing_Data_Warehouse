@@ -720,8 +720,30 @@ def _enrich_query_logs_for_cluster_profiles(df: pd.DataFrame) -> pd.DataFrame:
                 ex = {}
         if not isinstance(ex, dict):
             ex = {}
-        tc.append(float(ex.get("table_count", 0) or 0))
-        jc.append(float(ex.get("join_count", 0) or 0))
+        qtxt = str(row.get("query_text") or "")
+
+        def _safe_num(v: Any, default: float = 0.0) -> float:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        # Backward-compatible fallback: older rows may miss extracted_features.join_count/table_count.
+        # Estimate from SQL text so cluster profiles do not collapse to all-zero joins/tables.
+        inferred_joins = len(re.findall(r"\bJOIN\b", qtxt, flags=re.IGNORECASE))
+        inferred_tables = max(
+            0,
+            len(re.findall(r"\bFROM\s+[a-zA-Z0-9_.\"]+", qtxt, flags=re.IGNORECASE))
+            + len(re.findall(r"\bJOIN\s+[a-zA-Z0-9_.\"]+", qtxt, flags=re.IGNORECASE)),
+        )
+
+        raw_table_count = ex.get("table_count")
+        raw_join_count = ex.get("join_count")
+        table_count = _safe_num(raw_table_count, float(inferred_tables)) if raw_table_count is not None else float(inferred_tables)
+        join_count = _safe_num(raw_join_count, float(inferred_joins)) if raw_join_count is not None else float(inferred_joins)
+
+        tc.append(max(0.0, table_count))
+        jc.append(max(0.0, join_count))
         ha.append(float(ex.get("has_aggregation", 0) or 0))
         hw.append(float(ex.get("has_window_function", 0) or 0))
     out["table_count"] = tc
@@ -729,6 +751,20 @@ def _enrich_query_logs_for_cluster_profiles(df: pd.DataFrame) -> pd.DataFrame:
     out["has_aggregation"] = ha
     out["has_window_function"] = hw
     return out
+
+
+def _row_mean_exec_ms(row: Any) -> float:
+    calls_v = float(row.get("calls") or 0)
+    total_v = row.get("total_exec_time_ms")
+    try:
+        total_f = float(total_v) if total_v is not None else 0.0
+    except (TypeError, ValueError):
+        total_f = 0.0
+    mean_col = float(row.get("mean_exec_time_ms") or 0)
+    if calls_v > 0:
+        row_ms = total_f if total_f > 0 else mean_col * calls_v
+        return float(row_ms / calls_v)
+    return float(mean_col)
 
 
 def _fetch_query_logs_sample_df(conn, limit: int) -> pd.DataFrame:
@@ -798,6 +834,7 @@ def get_workload_clusters(
                     "contract_version": "v1",
                 },
             }
+        # Use raw ML model cluster labels as-is.
         labels = wc.predict_from_query_logs(df)
         enriched = _enrich_query_logs_for_cluster_profiles(df)
         profiles_raw = wc.get_cluster_profiles(enriched, labels)
@@ -906,6 +943,7 @@ def get_workload_cluster_queries(
                 },
             }
 
+        # Use raw ML model cluster labels as-is.
         labels = wc.predict_from_query_logs(df)
         labeled = df.copy()
         labeled["cluster_id"] = labels
@@ -929,7 +967,16 @@ def get_workload_cluster_queries(
                 },
             }
 
-        sorted_rows = group_df.sort_values(["collected_at"], ascending=[False], na_position="last").reset_index(drop=True)
+        # Build per-row average latency first, then sort rows by avg time.
+        avg_ms: List[float] = [_row_mean_exec_ms(r) for _, r in group_df.iterrows()]
+
+        sortable = group_df.copy()
+        sortable["mean_exec_ms"] = avg_ms
+        sorted_rows = sortable.sort_values(
+            ["mean_exec_ms", "collected_at"],
+            ascending=[True, False],
+            na_position="last",
+        ).reset_index(drop=True)
         total = int(len(sorted_rows))
         total_pages = max(1, (total + page_size - 1) // page_size)
         current_page = min(max(1, int(page)), total_pages)
@@ -944,17 +991,7 @@ def get_workload_cluster_queries(
             log_id = r.get("log_id")
             qh = r.get("query_hash")
             calls_v = float(r.get("calls") or 0)
-            total_v = r.get("total_exec_time_ms")
-            try:
-                total_f = float(total_v) if total_v is not None else 0.0
-            except (TypeError, ValueError):
-                total_f = 0.0
-            mean_col = float(r.get("mean_exec_time_ms") or 0)
-            if calls_v > 0:
-                row_ms = total_f if total_f > 0 else mean_col * calls_v
-                mean_ms = row_ms / calls_v
-            else:
-                mean_ms = mean_col
+            mean_ms = float(r.get("mean_exec_ms") or 0)
             rows.append(
                 {
                     "log_id": int(log_id) if log_id is not None else None,
@@ -1845,7 +1882,7 @@ def _query_perf_contract_meta(
         le = _iso_utc_or_none(r.get("last_executed"))
         if le and (wm is None or le > wm):
             wm = le
-    return {
+    out: Dict[str, Any] = {
         "window_start_utc": start_date,
         "window_end_utc": end_date,
         "data_watermark_utc": wm,
@@ -1856,6 +1893,16 @@ def _query_perf_contract_meta(
         "used_unbounded_fallback": bool(used_unbounded_fallback),
         "contract_version": "v1",
     }
+    # Exact bounds used in SQL: collected_at >= start AND collected_at < end_exclusive (UTC).
+    if start_date and end_date:
+        try:
+            ws, we = _date_strings_to_utc_ts_bounds(str(start_date)[:10], str(end_date)[:10])
+            out["window_start_ts_utc"] = ws.isoformat()
+            out["window_end_exclusive_ts_utc"] = we.isoformat()
+        except Exception:
+            out["window_start_ts_utc"] = None
+            out["window_end_exclusive_ts_utc"] = None
+    return out
 
 
 def _ensure_apply_events_table(cursor) -> None:
@@ -3366,6 +3413,16 @@ def _safe_float_ms_to_seconds(v: Any) -> float:
         return 0.0
 
 
+def _optional_float_ms(v: Any) -> Optional[float]:
+    """Preserve raw millisecond aggregates from SQL for DB/UI cross-check (optional field)."""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _safe_int_metric(v: Any) -> int:
     if v is None:
         return 0
@@ -3400,10 +3457,16 @@ def _query_perf_aggregate_rows_to_metrics_list(metrics: List[Any]) -> List[dict]
                 "query_id": metric.get("query_id", ""),
                 "query_hash": metric.get("query_hash", ""),
                 "execution_count": _safe_int_metric(metric.get("execution_count")),
+                # Seconds for dashboards; *_ms mirrors SQL so manual DB sums match the UI.
+                "avg_execution_time_ms": _optional_float_ms(metric.get("avg_execution_time")),
                 "avg_execution_time": _safe_float_ms_to_seconds(metric.get("avg_execution_time")),
+                "p50_execution_time_ms": _optional_float_ms(metric.get("p50_execution_time")),
                 "p50_execution_time": _safe_float_ms_to_seconds(metric.get("p50_execution_time")),
+                "p95_execution_time_ms": _optional_float_ms(metric.get("p95_execution_time")),
                 "p95_execution_time": _safe_float_ms_to_seconds(metric.get("p95_execution_time")),
+                "p99_execution_time_ms": _optional_float_ms(metric.get("p99_execution_time")),
                 "p99_execution_time": _safe_float_ms_to_seconds(metric.get("p99_execution_time")),
+                "total_execution_time_ms": _optional_float_ms(metric.get("total_execution_time")),
                 "total_execution_time": _safe_float_ms_to_seconds(metric.get("total_execution_time")),
                 "cache_hit_rate": cache_hit,
                 "last_executed": last_executed,

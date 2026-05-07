@@ -77,7 +77,6 @@ export default function WorkloadPatterns({
   }
   const areaPath = `${linePath} L${points[points.length - 1].x},${H - 20} L${points[0].x},${H - 20} Z`;
   const peakIdx = hourlyData.length ? hourlyData.indexOf(Math.max(...hourlyData)) : -1;
-  const barW = Math.max(3, Math.min(18, step * 0.62 || 12));
   const maxTableSize = Math.max(0.001, ...topTables.map((t) => t.sizeMb));
 
   return (

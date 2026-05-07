@@ -74,6 +74,8 @@ export function useDashboardData() {
   const [data, setData] = useState<DashboardData>(defaultData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [stale, setStale] = useState(false);
 
   const fetchAll = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
@@ -95,6 +97,8 @@ export function useDashboardData() {
       }
 
       setData(next);
+      setLastUpdatedAt(Date.now());
+      setStale(false);
 
       if (
         next.summary == null &&
@@ -109,11 +113,18 @@ export function useDashboardData() {
       if (!opts?.silent) {
         const msg = e instanceof Error ? e.message : 'Failed to load dashboard';
         setError(msg);
+        setStale(true);
         try {
           setData(await fetchDashboardLegacyParallel());
+          setLastUpdatedAt(Date.now());
+          setStale(false);
         } catch {
           setData(defaultData);
         }
+      } else {
+        const msg = e instanceof Error ? e.message : 'Silent refresh failed';
+        setError(msg);
+        setStale(true);
       }
     } finally {
       if (!opts?.silent) {
@@ -127,11 +138,12 @@ export function useDashboardData() {
   }, [fetchAll]);
 
   useEffect(() => {
+    if (pollIntervalMs <= 0) return;
     const id = setInterval(() => {
       void fetchAll({ silent: true });
     }, pollIntervalMs);
     return () => clearInterval(id);
   }, [fetchAll, pollIntervalMs]);
 
-  return { data, loading, error, refetch: () => void fetchAll() };
+  return { data, loading, error, refetch: () => void fetchAll(), lastUpdatedAt, stale };
 }

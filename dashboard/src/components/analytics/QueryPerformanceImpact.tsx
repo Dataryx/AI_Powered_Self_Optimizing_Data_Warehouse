@@ -15,11 +15,23 @@ interface QueryPerformanceImpactProps {
   onRefresh?: () => void;
 }
 
+function fmtSecs(s: number | undefined): string {
+  if (s == null || !Number.isFinite(s)) return '—';
+  if (s < 1) {
+    const ms = s * 1000;
+    if (ms < 0.1) return `${ms.toFixed(4)} ms`;
+    if (ms < 1) return `${ms.toFixed(3)} ms`;
+    if (ms < 10) return `${ms.toFixed(2)} ms`;
+    return `${ms.toFixed(1)} ms`;
+  }
+  return `${s.toFixed(2)}s`;
+}
+
 export default function QueryPerformanceImpact({ data, loading, onRefresh }: QueryPerformanceImpactProps) {
   const q = (data?.queryPerformance7d ?? []) as QueryPerfRow[];
   const agg = useMemo(() => deriveQueryAggregates(q), [q]);
   const top = useMemo(() => topQueriesByTotalTime(q, 8), [q]);
-  const maxTotal = Math.max(0.001, ...top.map((r) => r.total_execution_time ?? 0));
+  const topTotal = Math.max(0.001, top.reduce((sum, r) => sum + Math.max(0, r.total_execution_time ?? 0), 0));
   const wCache = useMemo(() => weightedMeanCacheHitRate(q), [q]);
   const slowSharePct = agg.totalExecutions > 0 ? agg.slowExecutionShare * 100 : 0;
   const [activeRow, setActiveRow] = useState<QueryPerfRow | null>(null);
@@ -38,9 +50,9 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
           </div>
           <div className="min-w-0">
             <h2 className="font-body text-base font-bold text-ink">Slow query impact</h2>
-            <p className="font-body text-[10px] text-ink-faint mt-0.5 leading-snug max-w-xl">
-              Top 8 query types by total time in the 7-day window. Impact % is relative to the slowest among these eight (not the full warehouse).
-            </p>
+            {/* <p className="font-body text-[10px] text-ink-faint mt-0.5 leading-snug max-w-xl">
+              Top 8 query types by total time in the 7-day window. Impact % is each query's share of total time across these eight.
+            </p> */}
           </div>
         </div>
         <button
@@ -70,7 +82,7 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
           </div>
           <div className="rounded-lg border border-topo-4/25 bg-topo-4/10 px-3 py-2">
                     <p className="text-[10px] text-ink-faint">Typical wait</p>
-            <p className="text-sm font-semibold text-topo-4 tabular-nums">{agg.weightedAvgLatencySec.toFixed(2)}s</p>
+            <p className="text-sm font-semibold text-topo-4 tabular-nums">{fmtSecs(agg.weightedAvgLatencySec)}</p>
           </div>
           <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
                     <p className="text-[10px] text-ink-faint">Cache hit rate</p>
@@ -123,16 +135,16 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                 </thead>
                 <tbody>
                   {top.map((row, i) => {
-                    const total = row.total_execution_time ?? 0;
-                    const pct = (total / maxTotal) * 100;
+                    const total = Math.max(0, row.total_execution_time ?? 0);
+                    const pct = (total / topTotal) * 100;
                     return (
                       <tr key={String(row.query_id ?? i)} className="border-t border-contour/50 align-top hover:bg-base/50">
                         <td className="px-2 py-1.5 text-ink-faint tabular-nums">{i + 1}</td>
                         <td className="px-2 py-1.5 text-ink-muted tabular-nums">
                           {(row.execution_count ?? 0).toLocaleString()}
                         </td>
-                        <td className="px-2 py-1.5 text-ink-muted tabular-nums">{(row.avg_execution_time ?? 0).toFixed(2)}s</td>
-                        <td className="px-2 py-1.5 text-ink-muted tabular-nums">{(row.p95_execution_time ?? 0).toFixed(2)}s</td>
+                        <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtSecs(row.avg_execution_time)}</td>
+                        <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtSecs(row.p95_execution_time)}</td>
                         <td className="px-2 py-1.5">
                           <div className="flex items-center gap-2">
                             <div className="w-24 h-2 rounded-md bg-base overflow-hidden border border-contour/80" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Relative time share">
@@ -205,7 +217,7 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                     Typical (avg / run)
                   </p>
                   <p className="text-sm font-semibold text-ink tabular-nums">
-                    {(activeRow.avg_execution_time ?? 0).toFixed(2)}s
+                    {fmtSecs(activeRow.avg_execution_time)}
                   </p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
@@ -213,7 +225,7 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                     Median (P50)
                   </p>
                   <p className="text-sm font-semibold text-ink tabular-nums">
-                    {(activeRow.p50_execution_time ?? 0).toFixed(2)}s
+                    {fmtSecs(activeRow.p50_execution_time)}
                   </p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
@@ -221,7 +233,7 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                     Worst (P95)
                   </p>
                   <p className="text-sm font-semibold text-ink tabular-nums">
-                    {(activeRow.p95_execution_time ?? 0).toFixed(2)}s
+                    {fmtSecs(activeRow.p95_execution_time)}
                   </p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
@@ -229,7 +241,7 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                     Total time
                   </p>
                   <p className="text-sm font-semibold text-ink tabular-nums">
-                    {(activeRow.total_execution_time ?? 0).toFixed(2)}s
+                    {fmtSecs(activeRow.total_execution_time)}
                   </p>
                 </div>
               </div>

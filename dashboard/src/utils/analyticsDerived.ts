@@ -26,6 +26,13 @@ function num(v: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const pp = Math.max(0, Math.min(1, p));
+  const idx = Math.floor(pp * (sorted.length - 1));
+  return sorted[idx] ?? 0;
+}
+
 /** Per-UTC-hour execution totals (7d window rows: each hash’s count placed at last_seen hour). */
 export function deriveWorkloadHourlyExecutions(queries: QueryPerfRow[]): number[] {
   const buckets = Array(24).fill(0);
@@ -166,25 +173,38 @@ export function deriveQueryAggregates(queries: QueryPerfRow[]): {
   let totalExec = 0;
   let weightedSum = 0;
   const avgs: number[] = [];
-  let slowDistinct = 0;
-  let slowExec = 0;
-
-  for (const q of rows) {
+  const p95s: number[] = [];
+  const points = rows.map((q) => {
     const c = Math.max(0, Math.floor(num(q.execution_count)));
     const avg = num(q.avg_execution_time);
     const p95 = num(q.p95_execution_time);
     totalExec += c;
     weightedSum += avg * c;
     avgs.push(avg);
-    const isSlow = avg >= SLOW_AVG_SEC || p95 >= SLOW_P95_SEC;
-    if (isSlow) {
-      slowDistinct += 1;
-      slowExec += c;
-    }
-  }
+    if (p95 > 0) p95s.push(p95);
+    return { c, avg, p95 };
+  });
 
   avgs.sort((a, b) => a - b);
+  p95s.sort((a, b) => a - b);
   const medianAvg = avgs.length ? avgs[Math.floor(avgs.length / 2)] : 0;
+
+  // Prefer absolute "slow" thresholds; if they classify nothing on a low-latency
+  // workload, fall back to top-quintile thresholds so KPIs reflect real tails.
+  const hasAbsoluteSlow = points.some((x) => x.avg >= SLOW_AVG_SEC || x.p95 >= SLOW_P95_SEC);
+  const tailAvgThreshold = percentile(avgs.filter((v) => v > 0), 0.8);
+  const tailP95Threshold = percentile(p95s.filter((v) => v > 0), 0.8);
+
+  let slowDistinct = 0;
+  let slowExec = 0;
+  for (const x of points) {
+    const isSlow = hasAbsoluteSlow
+      ? x.avg >= SLOW_AVG_SEC || x.p95 >= SLOW_P95_SEC
+      : (tailAvgThreshold > 0 && x.avg >= tailAvgThreshold) || (tailP95Threshold > 0 && x.p95 >= tailP95Threshold);
+    if (!isSlow) continue;
+    slowDistinct += 1;
+    slowExec += x.c;
+  }
 
   return {
     totalExecutions: totalExec,

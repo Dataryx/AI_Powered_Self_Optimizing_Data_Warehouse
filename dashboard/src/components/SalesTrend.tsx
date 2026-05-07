@@ -517,7 +517,7 @@ export default function SalesTrend({ data = null, loading = false }: SalesTrendP
           <div className="flex gap-4 shrink-0">
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-[3px] rounded-full bg-[#f87171]" />
-              <span className="font-mono text-[10px] text-[#5a6a8a]">Orders</span>
+              <span className="font-mono text-[10px] text-[#5a6a8a]">Transactions</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-[3px] rounded-full bg-[#818cf8]" />
@@ -577,7 +577,7 @@ export default function SalesTrend({ data = null, loading = false }: SalesTrendP
               <p className="font-body text-sm text-[#a0b0cc] max-w-md leading-relaxed">
                 For <span className="text-[#e0e8f5] font-medium">2 yr</span> and{' '}
                 <span className="text-[#e0e8f5] font-medium">All</span>, the graph is replaced with an Excel export: one sheet of daily
-                rows (<span className="font-mono text-[11px]">Date</span>, <span className="font-mono text-[11px]">Orders</span>,{' '}
+                rows (<span className="font-mono text-[11px]">Date</span>, <span className="font-mono text-[11px]">Transactions</span>,{' '}
                 <span className="font-mono text-[11px]">Revenue</span>). A download starts automatically when data is ready.
               </p>
               <p className="font-mono text-[10px] text-[#5a6a8a]">
@@ -620,7 +620,7 @@ export default function SalesTrend({ data = null, loading = false }: SalesTrendP
                 fill="#6a7a9a"
                 style={{ fontSize: '9px', fontFamily: 'Space Mono', letterSpacing: '0.06em' }}
               >
-                Orders
+                Transactions
               </text>
               <text
                 x={W - PR}
@@ -764,7 +764,7 @@ export default function SalesTrend({ data = null, loading = false }: SalesTrendP
                         fill="#a0b0cc"
                         style={{ fontSize: '9px', fontFamily: 'Space Mono' }}
                       >
-                        orders · revenue
+                        transactions · revenue
                       </text>
                       <text
                         x={x - 34}
@@ -795,7 +795,7 @@ export default function SalesTrend({ data = null, loading = false }: SalesTrendP
           <div className="px-5 py-3 border-t border-[#1e2540] flex flex-wrap gap-6">
             <div>
               <span className="font-mono text-[9px] text-[#3a4a6a] tracking-widest uppercase">
-                {isCurrentMonthDaily ? 'Peak day (orders)' : 'Peak month (orders)'}
+                {isCurrentMonthDaily ? 'Peak day (transactions)' : 'Peak month (transactions)'}
               </span>
               <p className="font-body text-lg font-bold text-[#e0e8f5]">
                 {peakSales.sales.toLocaleString()}{' '}
@@ -813,10 +813,10 @@ export default function SalesTrend({ data = null, loading = false }: SalesTrendP
             </div>
             <div>
               <span className="font-mono text-[9px] text-[#3a4a6a] tracking-widest uppercase">
-                {isCurrentMonthDaily ? 'Avg / day (orders)' : 'Avg / month'}
+                {isCurrentMonthDaily ? 'Avg / day (transactions)' : 'Avg / month'}
               </span>
               <p className="font-body text-lg font-bold text-[#e0e8f5]">
-                {avgPerDayOrMonth.toLocaleString()} orders
+                {avgPerDayOrMonth.toLocaleString()} transactions
               </p>
             </div>
           </div>

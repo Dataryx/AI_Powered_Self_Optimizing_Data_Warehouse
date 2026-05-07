@@ -4,24 +4,8 @@ import MedallionTiers from '../components/MedallionTiers';
 import KeyMetrics from '../components/KeyMetrics';
 import SalesTrend from '../components/SalesTrend';
 import TopProducts from '../components/TopProducts';
-import Footer, { type FooterHealthInfo } from '../components/Footer';
-import { useDashboardData, type DashboardData } from '../hooks/useDashboardData';
-
-function footerHealthFromDashboard(data: DashboardData | null, loading: boolean): FooterHealthInfo {
-  const h = data?.health as Record<string, unknown> | null | undefined;
-  const healthy = data?.health != null;
-  const pending = loading && !healthy;
-  const uptime = h && h.uptime != null ? String(h.uptime) : '99.97%';
-  const latency =
-    h && h.latency_ms != null ? `< ${h.latency_ms} ms` : '< 2 ms';
-  return {
-    status: healthy ? 'Online' : 'Unknown',
-    uptime,
-    latency,
-    healthy,
-    pending,
-  };
-}
+import Footer from '../components/Footer';
+import { useDashboardData } from '../hooks/useDashboardData';
 
 export default function DashboardPage() {
   const { data, loading, error, refetch } = useDashboardData();
@@ -47,7 +31,7 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
-      <Footer health={footerHealthFromDashboard(data, loading)} />
+      <Footer />
     </div>
   );
 }

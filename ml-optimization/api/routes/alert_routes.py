@@ -13,6 +13,7 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 from ml_optimization.utils.db_utils import get_db_connection
+from psycopg2 import sql
 from psycopg2.extras import RealDictCursor, Json, execute_batch
 
 from models.anomaly_detector import QueryAnomalyDetector
@@ -62,6 +63,7 @@ def _detect_model_anomalies(
     conn,
     max_rows: int = 2000,
     max_anomalies: int = 20,
+    recency_hours: int = 24,
 ) -> List[Dict[str, Any]]:
     """Detect anomalies using the trained IsolationForest model."""
     detector = _load_anomaly_detector()
@@ -82,10 +84,11 @@ def _detect_model_anomalies(
         FROM ml_optimization.query_logs
         WHERE query_text IS NOT NULL
           AND mean_exec_time_ms > 0
+          AND collected_at >= (CURRENT_TIMESTAMP - (%s * INTERVAL '1 hour'))
         ORDER BY collected_at DESC
         LIMIT %s
         """,
-        (max_rows,),
+        (max(1, int(recency_hours)), max_rows),
     )
     rows = cursor.fetchall()
     cursor.close()
@@ -320,6 +323,8 @@ def fetch_incidents_from_db(conn) -> dict:
             SELECT incident_id, title, description, severity, status, started_at, resolved_at,
                    alert_count, affected_tables
             FROM monitoring.incidents
+            WHERE status = 'open'
+               OR (status = 'resolved' AND resolved_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours')
             ORDER BY COALESCE(started_at, updated_at) DESC NULLS LAST, updated_at DESC
             LIMIT 500;
             """
@@ -454,14 +459,29 @@ def build_active_alerts_payload(conn) -> dict:
                 WHERE schemaname IN ('bronze', 'silver', 'gold')
                 AND n_live_tup = 0
             """)
-            empty_tables = cursor.fetchall()
-            for table in empty_tables:
+            maybe_empty_tables = cursor.fetchall()
+            for table in maybe_empty_tables:
+                schema_name, table_name = table[0], table[1]
+                # Verify with real data scan (LIMIT 1) to avoid false positives from stale n_live_tup stats.
+                try:
+                    cursor.execute(
+                        sql.SQL("SELECT EXISTS (SELECT 1 FROM {}.{} LIMIT 1)").format(
+                            sql.Identifier(schema_name),
+                            sql.Identifier(table_name),
+                        )
+                    )
+                    has_rows = bool(cursor.fetchone()[0])
+                except Exception:
+                    # If we cannot verify accurately, skip alert rather than emit a false positive.
+                    continue
+                if has_rows:
+                    continue
                 alerts.append({
-                    "alert_id": f"empty_table_{table[0]}_{table[1]}",
+                    "alert_id": f"empty_table_{schema_name}_{table_name}",
                     "type": "empty_table",
                     "severity": sev_empty,
-                    "title": f"Empty table detected: {table[0]}.{table[1]}",
-                    "message": f"The table {table[1]} in {table[0]} layer has no data. ETL process may have failed.",
+                    "title": f"Empty table detected: {schema_name}.{table_name}",
+                    "message": f"The table {table_name} in {schema_name} layer has no data. ETL process may have failed.",
                     "timestamp": datetime.now().isoformat(),
                     "status": "active",
                     "acknowledged": False,
@@ -555,7 +575,7 @@ def build_active_alerts_payload(conn) -> dict:
         except Exception:
             pass
 
-    # 5. ETL failures from monitoring.job_runs (real monitoring data)
+    # 5. ETL failures from monitoring.job_runs (recent failures only).
     if rules.get("etl_failure", {}).get("enabled", True):
         try:
             cursor.execute("""
@@ -584,6 +604,7 @@ def build_active_alerts_payload(conn) -> dict:
                     JOIN monitoring.etl_jobs j
                       ON jr.job_id = j.job_id
                     WHERE jr.status IN ('failed', 'error')
+                      AND jr.started_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
                     ORDER BY jr.started_at DESC
                     LIMIT 20
                 """)
@@ -609,10 +630,10 @@ def build_active_alerts_payload(conn) -> dict:
         except Exception:
             pass
 
-    # 6. Model-based anomalies (trained anomaly_detector.pkl)
+    # 6. Model-based anomalies (trained anomaly_detector.pkl, recent window only).
     if rules.get("model_anomaly", {}).get("enabled", True):
         try:
-            model_anoms = _detect_model_anomalies(conn, max_rows=1500, max_anomalies=10)
+            model_anoms = _detect_model_anomalies(conn, max_rows=1500, max_anomalies=10, recency_hours=24)
             for anom in model_anoms:
                 alerts.append({
                     "alert_id": anom.get("id")
@@ -629,7 +650,7 @@ def build_active_alerts_payload(conn) -> dict:
         except Exception as e:
             logger.warning("Model anomaly detection failed: %s", e)
 
-    # 7. Slow queries from query_logs (mean execution time)
+    # 7. Slow queries from query_logs (recent window only).
     if rules.get("slow_query", {}).get("enabled", True):
         try:
             sec = float(rules.get("slow_query", {}).get("threshold", 5.0))
@@ -638,7 +659,9 @@ def build_active_alerts_payload(conn) -> dict:
             cursor.execute("""
                 SELECT query_text, mean_exec_time_ms, collected_at
                 FROM ml_optimization.query_logs
-                WHERE mean_exec_time_ms IS NOT NULL AND mean_exec_time_ms > %s
+                WHERE mean_exec_time_ms IS NOT NULL
+                  AND mean_exec_time_ms > %s
+                  AND collected_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
                 ORDER BY collected_at DESC NULLS LAST
                 LIMIT 15
             """, (threshold_ms,))

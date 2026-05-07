@@ -1,7 +1,11 @@
 import { useMemo, useCallback, useState } from 'react';
 import { useOptimizationRealtimeWebSocket } from './useOptimizationRealtimeWebSocket';
+import { useQueryPerformanceFetch } from './useQueryPerformanceFetch';
 
 const REC_LIMIT = 100;
+
+/** Fixed window for the optimization stream only; UI query-performance uses `performanceDays` via REST. */
+const STREAM_INTERNAL_PERFORMANCE_DAYS = 7;
 
 export type OptimizationStreamMeta = {
   lastUpdate: Date | null;
@@ -10,18 +14,24 @@ export type OptimizationStreamMeta = {
 };
 
 /**
- * Live optimization data: one WebSocket (or HTTP polling) shared across the Optimizations page.
- * No dummy/sample rows — empty panels mean the API returned no data.
+ * Live optimization data: one WebSocket (or HTTP polling) for recommendations + history.
+ * Query performance for the selected period is loaded separately so changing the time range
+ * does not reconnect the stream or reload other panels.
  */
 export function useOptimizationsData(performanceDays: number) {
   const [refreshKey, setRefreshKey] = useState(0);
   const opt = useOptimizationRealtimeWebSocket({
-    performanceDays,
+    performanceDays: STREAM_INTERNAL_PERFORMANCE_DAYS,
     performanceLimit: REC_LIMIT,
     recommendationsLimit: REC_LIMIT,
     historyLimit: REC_LIMIT,
     wsIntervalMs: 2000,
     fallbackIntervalMs: 2000,
+    refreshKey,
+  });
+
+  const queryPerf = useQueryPerformanceFetch(performanceDays, {
+    limit: REC_LIMIT,
     refreshKey,
   });
 
@@ -32,9 +42,10 @@ export function useOptimizationsData(performanceDays: number) {
         ...(opt.partitionRecommendations ?? []),
       ],
       recommendationsDebug: (opt.snapshot as { debug?: unknown } | null)?.debug ?? (opt.snapshot as any)?.index?.debug,
-      queryPerformance: opt.performanceMetrics,
+      queryPerformance: queryPerf.metrics,
       queryPerformanceMeta: {
-        usedUnboundedFallback: opt.performanceUsedUnboundedFallback,
+        usedUnboundedFallback: queryPerf.usedUnboundedFallback,
+        ...(queryPerf.contractMeta ?? {}),
       },
       history: opt.history ?? [],
     }),
@@ -42,8 +53,9 @@ export function useOptimizationsData(performanceDays: number) {
       opt.indexRecommendations,
       opt.partitionRecommendations,
       opt.snapshot,
-      opt.performanceMetrics,
-      opt.performanceUsedUnboundedFallback,
+      queryPerf.metrics,
+      queryPerf.usedUnboundedFallback,
+      queryPerf.contractMeta,
       opt.history,
     ],
   );
@@ -57,5 +69,13 @@ export function useOptimizationsData(performanceDays: number) {
     usingFallback: opt.usingFallback,
   };
 
-  return { data, loading, error: opt.error, refetch, stream };
+  return {
+    data,
+    loading,
+    error: opt.error,
+    queryPerformanceLoading: queryPerf.loading,
+    queryPerformanceError: queryPerf.error,
+    refetch,
+    stream,
+  };
 }

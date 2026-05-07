@@ -9,6 +9,7 @@ import PartitionRecommendations from '../components/optimizations/PartitionRecom
 import QueryPerformance from '../components/optimizations/QueryPerformance';
 import OptimizationHistory from '../components/optimizations/OptimizationHistory';
 import { useOptimizationsData } from '../hooks/useOptimizationsData';
+import { utcPerformanceDateRange } from '../utils/queryPerformance';
 import { formatLocalTime } from '../utils/time';
 import { loadMonitoringPreferences } from '../settings/monitoringPreferences';
 
@@ -45,7 +46,16 @@ export default function OptimizationsPage() {
     closestTimeRangeLabel(loadMonitoringPreferences().retentionDays),
   );
   const performanceDays = useMemo(() => daysFromLabel(timeRange), [timeRange]);
-  const { data, loading, error, refetch, stream } = useOptimizationsData(performanceDays);
+  const queryPerfUtcWindow = useMemo(() => utcPerformanceDateRange(performanceDays), [performanceDays]);
+  const {
+    data,
+    loading,
+    error,
+    queryPerformanceLoading,
+    queryPerformanceError,
+    refetch,
+    stream,
+  } = useOptimizationsData(performanceDays);
   const [recTab, setRecTab] = useState<'index' | 'partition'>('index');
   const [clock, setClock] = useState(new Date());
   useEffect(() => {
@@ -291,8 +301,10 @@ export default function OptimizationsPage() {
             <div className="rounded-3xl border border-contour-strong/50 bg-surface/30 backdrop-blur-xl p-1">
               <QueryPerformance
                 data={data}
-                loading={loading}
+                loading={queryPerformanceLoading}
+                perfError={queryPerformanceError}
                 timeRange={timeRange}
+                dateWindowUtc={`${queryPerfUtcWindow.startDate} → ${queryPerfUtcWindow.endDate}`}
                 onTimeRangeChange={(r) => {
                   if (r === 'Last 7 days' || r === 'Last 30 days' || r === 'Last 90 days') setTimeRange(r);
                 }}

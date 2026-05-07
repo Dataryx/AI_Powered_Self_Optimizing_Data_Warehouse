@@ -8,6 +8,7 @@ import re
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from datetime import date, timedelta
+from psycopg2 import sql
 from ml_optimization.utils.db_utils import get_db_connection
 
 router = APIRouter()
@@ -30,16 +31,41 @@ def _fetch_warehouse_summary(conn) -> dict:
             (schema,),
         )
         table_count = cursor.fetchone()[0]
+        # Exact row counts per table for correctness (stats estimates can be stale).
         cursor.execute(
             """
-            SELECT SUM(n_tup_ins - n_tup_del) as estimated_rows
-            FROM pg_stat_user_tables
+            SELECT tablename
+            FROM pg_tables
             WHERE schemaname = %s
+            ORDER BY tablename
             """,
             (schema,),
         )
-        row_result = cursor.fetchone()
-        estimated_rows = row_result[0] if row_result[0] else 0
+        table_names = [str(r[0]) for r in cursor.fetchall()]
+        estimated_rows = 0
+        for tname in table_names:
+            try:
+                cursor.execute(
+                    sql.SQL("SELECT COUNT(*) FROM {}.{}").format(
+                        sql.Identifier(schema),
+                        sql.Identifier(tname),
+                    )
+                )
+                estimated_rows += int(cursor.fetchone()[0] or 0)
+            except Exception:
+                # Conservative fallback: use pg_stat count for just this table if exact count fails.
+                try:
+                    cursor.execute(
+                        """
+                        SELECT COALESCE(n_live_tup, 0)
+                        FROM pg_stat_user_tables
+                        WHERE schemaname = %s AND relname = %s
+                        """,
+                        (schema, tname),
+                    )
+                    estimated_rows += int(cursor.fetchone()[0] or 0)
+                except Exception:
+                    continue
         cursor.execute(
             """
             SELECT pg_size_pretty(SUM(pg_total_relation_size(schemaname||'.'||tablename))) as total_size,

@@ -31,6 +31,7 @@ export function useAlertsData() {
   }>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
 
   const fetchAll = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
@@ -59,6 +60,7 @@ export function useAlertsData() {
             incidents: { total: inc?.total, open: inc?.open, resolved: inc?.resolved },
           },
         });
+        setLastUpdatedAt(Date.now());
       } catch (e) {
         if (!shouldFallbackFromBundleError(e)) {
           throw e;
@@ -105,6 +107,7 @@ export function useAlertsData() {
             },
           },
         });
+        setLastUpdatedAt(Date.now());
       }
     } catch (e: any) {
       if (!opts?.silent) {
@@ -122,11 +125,12 @@ export function useAlertsData() {
   }, [fetchAll]);
 
   useEffect(() => {
+    if (pollIntervalMs <= 0) return;
     const id = setInterval(() => {
       void fetchAll({ silent: true });
     }, pollIntervalMs);
     return () => clearInterval(id);
   }, [fetchAll, pollIntervalMs]);
 
-  return { data, loading, error, refetch: () => void fetchAll() };
+  return { data, loading, error, refetch: () => void fetchAll(), lastUpdatedAt };
 }

@@ -9,15 +9,25 @@ const QUERY_PAGE_SIZE = 10;
 interface QueryPerformanceProps {
   data?: any;
   loading?: boolean;
+  /** Load/error state for query-performance REST only (recommendations may stay mounted). */
+  perfError?: string | null;
   /** Controlled from parent so query window matches the live optimization snapshot. */
   timeRange?: string;
+  /** UTC date span matching API/WS window (e.g. from `utcPerformanceDateRange`). */
+  dateWindowUtc?: string;
   onTimeRangeChange?: (range: string) => void;
   timeRangeOptions?: string[];
 }
 
 function fmtSeconds(s: number | undefined | null): string {
   if (s == null || Number.isNaN(s)) return '—';
-  if (s < 1) return `${(s * 1000).toFixed(0)} ms`;
+  // Sub-second times: avoid toFixed(0) on ms — values under ~0.5 ms were rounding to "0 ms".
+  if (s < 1) {
+    const ms = s * 1000;
+    if (ms === 0) return '0 ms';
+    if (ms < 10) return `${ms.toFixed(2)} ms`;
+    return `${ms.toFixed(1)} ms`;
+  }
   return `${s.toFixed(3)} s`;
 }
 
@@ -26,10 +36,17 @@ function fmtPct01(x: number | undefined | null): string {
   return `${(x * 100).toFixed(1)}%`;
 }
 
+function fmtMsOpt(n: unknown): string {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  return `${Number(n).toLocaleString(undefined, { maximumFractionDigits: 3 })} ms`;
+}
+
 export default function QueryPerformance({
   data,
   loading,
+  perfError,
   timeRange: controlledRange,
+  dateWindowUtc,
   onTimeRangeChange,
   timeRangeOptions = DEFAULT_TIME_RANGES,
 }: QueryPerformanceProps) {
@@ -40,7 +57,20 @@ export default function QueryPerformance({
   const [page, setPage] = useState(1);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const rows = Array.isArray(data?.queryPerformance) ? data.queryPerformance : [];
-  const usedUnboundedFallback = Boolean(data?.queryPerformanceMeta?.usedUnboundedFallback);
+  const qpMeta = data?.queryPerformanceMeta as
+    | {
+        usedUnboundedFallback?: boolean;
+        window_start_ts_utc?: string;
+        window_end_exclusive_ts_utc?: string;
+        window_start_utc?: string;
+        window_end_utc?: string;
+      }
+    | undefined;
+  const usedUnboundedFallback = Boolean(qpMeta?.usedUnboundedFallback);
+  const serverWindowTs =
+    qpMeta?.window_start_ts_utc && qpMeta?.window_end_exclusive_ts_utc
+      ? `${qpMeta.window_start_ts_utc} ≤ collected_at < ${qpMeta.window_end_exclusive_ts_utc}`
+      : null;
   const totalPages = Math.max(1, Math.ceil(rows.length / QUERY_PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * QUERY_PAGE_SIZE;
@@ -49,7 +79,7 @@ export default function QueryPerformance({
   useEffect(() => {
     setPage(1);
     setExpandedRow(null);
-  }, [rows.length]);
+  }, [rows.length, range]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -74,9 +104,10 @@ export default function QueryPerformance({
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="font-mono text-[9px] text-ink-faint tracking-wider whitespace-nowrap">Time period</span>
-          <div className="relative">
+        <div className="flex flex-col items-end gap-0.5 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[9px] text-ink-faint tracking-wider whitespace-nowrap">Time period</span>
+            <div className="relative">
             <button
               type="button"
               onClick={() => setOpen(!open)}
@@ -104,16 +135,66 @@ export default function QueryPerformance({
                 ))}
               </div>
             )}
+            </div>
           </div>
+          {(serverWindowTs || dateWindowUtc) && (
+            <div className="max-w-[min(100vw-2rem,26rem)] text-right space-y-0.5">
+              {/* {qpMeta?.window_start_utc && qpMeta?.window_end_utc && (
+                <span className="block font-mono text-[9px] text-ink-soft" title="Inclusive calendar dates sent to the API">
+                  <span className="text-ink-faint">Dashboard period (UTC dates): </span>
+                  {String(qpMeta.window_start_utc)} → {String(qpMeta.window_end_utc)} inclusive
+                </span>
+              )} */}
+            <span
+              className="block font-mono text-[9px] text-ink-faint/80 line-clamp-3"
+              title={serverWindowTs ?? dateWindowUtc}
+            >
+              {serverWindowTs ? (
+                <>
+                  {/* <span className="opacity-90">Server filter (UTC): </span> */}
+                  {/* <span className="break-all">{serverWindowTs}</span> */}
+                </>
+              ) : (
+                <>UTC window: {dateWindowUtc}</>
+              )}
+            </span>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="px-5 pb-5">
+        {perfError && (
+          <div className="mb-3 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-sm font-mono">
+            {perfError}
+          </div>
+        )}
+        {loading && rows.length > 0 && !perfError && (
+          <div className="mb-3 font-mono text-[10px] text-ink-faint flex items-center gap-2">
+            <span className="inline-block w-3 h-3 rounded-full border border-contour border-t-topo-5 animate-spin shrink-0" />
+            Updating query list for the selected period…
+          </div>
+        )}
         {usedUnboundedFallback && rows.length > 0 && (
           <div className="mb-3 px-3 py-2 rounded-xl border border-amber-500/25 bg-amber-500/8 font-mono text-[10px] text-amber-800 dark:text-amber-200/90">
             The selected period has no query rows. Displaying top queries from the full available history.
           </div>
         )}
+        {/* {serverWindowTs && !usedUnboundedFallback && rows.length > 0 && (
+          <div className="mb-3 px-3 py-2 rounded-xl border border-contour-strong/60 bg-base/40 font-mono text-[10px] text-ink-soft leading-relaxed">
+            Numbers match the API aggregation on <span className="text-ink">ml_optimization.query_logs</span> (grouped
+            by <span className="text-ink">query_hash</span>): same time bounds as above, Σ{' '}
+            <span className="text-ink">calls</span> as runs, Σ{' '}
+            <span className="text-ink">total_exec_time_ms</span> (or mean×calls when total is null) for totals and
+            weighted average for avg. Expanded row includes <span className="text-ink">total_execution_time_ms</span>{' '}
+            for direct comparison with SQL.
+            <span className="block mt-2 text-ink-faint">
+              If your manual SQL uses a shorter range (e.g. only four calendar days) while the dashboard is set to{' '}
+              <span className="text-ink">Last 30 days</span>, run counts will differ by about the ratio of those window
+              lengths—this is expected, not a bug.
+            </span>
+          </div>
+        )} */}
         {loading && rows.length === 0 && (
           <div className="flex flex-col items-center justify-center py-14">
             <div className="w-8 h-8 rounded-full border-2 border-contour border-t-topo-5 animate-spin mb-4" />
@@ -121,7 +202,7 @@ export default function QueryPerformance({
           </div>
         )}
 
-        {!loading && rows.length === 0 && (
+        {!loading && rows.length === 0 && !perfError && (
           <div className="flex flex-col items-center justify-center py-14">
             <div className="w-14 h-14 rounded-full bg-base border border-contour-strong flex items-center justify-center mb-4">
               <PenLine size={22} className="text-ink-faint" />
@@ -203,7 +284,9 @@ export default function QueryPerformance({
                                 </div>
                                 <div>
                                   <span className="text-ink-faint uppercase tracking-wider">Time window</span>
-                                  <p className="text-ink-soft mt-0.5">{range}</p>
+                                  <p className="text-ink-soft mt-0.5 font-mono text-[10px] break-all leading-snug">
+                                    {serverWindowTs ?? dateWindowUtc ?? range}
+                                  </p>
                                 </div>
                               </div>
                               <div>
@@ -216,6 +299,18 @@ export default function QueryPerformance({
                                     : 'Query text is not available for this entry.'}
                                 </pre>
                               </div>
+                              {(q.total_execution_time_ms != null || q.execution_count != null) && (
+                                <div className="font-mono text-[10px] text-ink-faint border-t border-contour/60 pt-3">
+                                  <span className="text-ink-faint uppercase tracking-wider">DB alignment</span>
+                                  <p className="mt-1 text-ink-soft">
+                                    <span className="text-ink">total_execution_time_ms</span>={fmtMsOpt(q.total_execution_time_ms)} ·{' '}
+                                    <span className="text-ink">execution_count</span> (Σ calls)={Number(q.execution_count ?? 0).toLocaleString()}
+                                    {' — '}
+                                    filter by <span className="text-ink">query_hash</span> and the same{' '}
+                                    <span className="text-ink">collected_at</span> bounds as the Time window above.
+                                  </p>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>

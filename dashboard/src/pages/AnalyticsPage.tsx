@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronLeft, Clock, RefreshCw, BarChart3, LineChart, PieChart, Layers } from 'lucide-react';
+import { ChevronLeft, Clock, RefreshCw, BarChart3, LineChart, PieChart, Layers, Sparkles } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import SidebarPageShell from '../components/SidebarPageShell';
 import MobileMenuButton from '../components/MobileMenuButton';
@@ -8,6 +8,7 @@ import AnalyticsStats from '../components/analytics/AnalyticsStats';
 import QueryPerformanceImpact from '../components/analytics/QueryPerformanceImpact';
 import WorkloadPatterns from '../components/analytics/WorkloadPatterns';
 import WorkloadCacheMlPanels from '../components/analytics/WorkloadCacheMlPanels';
+import MLHotspotTimeline from '../components/analytics/MLHotspotTimeline';
 import { useAnalyticsData } from '../hooks/useAnalyticsData';
 import { useWorkloadCacheInsights } from '../hooks/useWorkloadCacheInsights';
 import { useMetricsAggregation } from '../hooks/useMonitoringPreferences';
@@ -16,6 +17,7 @@ import { formatLocalTime } from '../utils/time';
 const jumpLinks = [
   { id: 'analytics-overview', label: 'Overview', icon: BarChart3 },
   { id: 'analytics-ml-workload-cache', label: 'Smart insights', icon: Layers },
+  { id: 'analytics-hotspots', label: 'ML hotspots', icon: Sparkles },
   { id: 'analytics-queries', label: 'Slow queries', icon: LineChart },
   { id: 'analytics-workload', label: 'Busy times', icon: PieChart },
 ] as const;
@@ -155,14 +157,14 @@ export default function AnalyticsPage() {
 
         <AnalyticsStats data={data} loading={loading} />
 
-        <div className="mt-6">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 mt-6">
           <WorkloadCacheMlPanels
             workload={workloadInsight}
             cache={cacheInsight}
             loading={wcLoading}
             error={wcError}
-            onRefresh={() => void refetchWc()}
           />
+          <MLHotspotTimeline data={data} loading={loading} onRefresh={refetch} />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 mt-6">
