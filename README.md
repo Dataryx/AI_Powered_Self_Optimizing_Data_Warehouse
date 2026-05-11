@@ -227,13 +227,3 @@ Ensure PostgreSQL is up and schemas/tables exist per your initialization scripts
 - **Windows asyncio noise** — `start_services.py` already sets a Selector event loop policy where needed; use that script from repo root.
 
 ---
-
-## License
-
-See `LICENSE` in the repository root (placeholder until you add MIT, Apache-2.0, or your institution’s terms).
-
----
-
-## Contributing / course use
-
-Keep secrets out of Git (use `.env`, not committed). The repo ignores common artifacts such as `node_modules/`, `dist/`, virtualenvs, and `*.log` per `.gitignore`.
