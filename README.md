@@ -1,326 +1,239 @@
 # AI-Powered Self-Optimizing Data Warehouse
 
-**Presentation-ready overview** for academic evaluation: problem framing, architecture, ML design, algorithms, implementation, and a short demo script.
+A full-stack data warehouse project with **bronze → silver → gold** ETL, a **FastAPI** backend for warehouse metrics and ML-assisted optimizations, and a **React (Vite)** dashboard for monitoring, analytics, and recommendations.
 
 ---
 
-## 1. Problem Statement & Motivation
+## Table of contents
 
-### Limitations of traditional data warehouses
-
-| Limitation | What goes wrong | Why it matters |
-|------------|-----------------|----------------|
-| **Manual tuning** | DBAs pick indexes, partitions, and parameters by intuition or ad hoc EXPLAIN plans. | Slow iteration; expertise does not scale with data or query growth. |
-| **Static physical design** | Schemas and partitioning are fixed at deployment; workload shifts (new reports, seasonality) are not reflected automatically. | Yesterday’s optimal layout becomes today’s full table scan. |
-| **Performance bottlenecks** | Hot tables, sequential scans, poor join order, cache pressure. | Latency spikes for analysts and downstream apps; SLA risk. |
-| **Cost inefficiency** | Over-provisioning “just in case,” or under-provisioning and firefighting. | Cloud bills and operational load grow faster than business value. |
-
-**Analogy:** A traditional warehouse is like a highway network designed once for morning traffic—if evening patterns change, congestion appears until someone manually adds lanes (indexes) or redraws districts (partitions).
-
-### Why automation and intelligence are necessary
-
-- **Workload is continuous:** Query mix, volume, and data skew change; static rules cannot cover all cases.
-- **Signal is abundant:** Execution time, I/O, buffer hits, and query text are measurable—machine learning can turn them into **prioritized actions** (what to index, what to partition, what to watch).
-- **Human bandwidth is finite:** Automation proposes candidates; humans (or policy) approve—reducing toil while keeping governance.
+1. [What this system does](#what-this-system-does)
+2. [Architecture](#architecture)
+3. [Prerequisites](#prerequisites)
+4. [Quick start (local development)](#quick-start-local-development)
+5. [Docker](#docker)
+6. [Dashboard configuration](#dashboard-configuration)
+7. [ETL pipeline](#etl-pipeline)
+8. [Optional tooling](#optional-tooling)
+9. [Repository layout](#repository-layout)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
-## 2. System Architecture (End-to-End)
+## What this system does
 
-### Layered view
+- **Data warehouse layers** — Staged ingestion and transformation (bronze / silver / gold) backed by **PostgreSQL**.
+- **ML optimization API** — Endpoints for recommendations, workload analytics, storage insights, alerts, WebSocket streams, and system activity logging (`ml-optimization`).
+- **Dashboard** — Single-page app for operational views, analytics bundles, and optimization workflows (`dashboard`).
+- **Caching / coordination** — **Redis** for supported flows (see compose and service configs).
+- **Observability (optional)** — **Prometheus** and **Grafana** via compose overrides.
+
+---
+
+## Architecture
 
 ```mermaid
-flowchart TB
-  subgraph vis[Visualization and monitoring]
-    UI[React dashboards, alerts, WebSockets]
+flowchart LR
+  subgraph clients [Clients]
+    UI[React Dashboard]
   end
-  subgraph opt[Optimization and AI layer]
-    API[FastAPI: recommendations, metrics, ML scoring]
+  subgraph backend [Backend]
+    API[FastAPI ML API]
   end
-  subgraph qe[Query engine and catalog]
-    PG[PostgreSQL: SQL, pg_stat_statements, EXPLAIN]
+  subgraph data [Data layer]
+    PG[(PostgreSQL)]
+    RD[(Redis)]
   end
-  subgraph proc[Processing]
-    ETL[ETL and ELT: bronze to silver to gold]
-  end
-  subgraph stor[Storage]
-    MW[(Medallion schemas in PostgreSQL)]
-  end
-  subgraph ing[Ingestion]
-    BATCH[Batch-oriented loaders]
-  end
-  ing --> stor
-  stor --> proc
-  proc --> PG
-  PG --> API
-  API --> UI
+  UI -->|REST / WebSocket| API
+  API --> PG
+  API --> RD
 ```
 
-*Plain-text flow (top-down):* **Ingestion → Storage (medallion) → ETL/ELT → PostgreSQL → ML/optimization API → Dashboards.**
+Typical **local dev** ports:
 
-**Ingestion (batch + streaming posture)**  
-- **Implemented:** Batch-oriented ingestion and ETL-style scripts into **bronze** (raw/near-raw).  
-- **Extensible:** The same medallion pattern can accept **streaming** sources (e.g., change streams, CDC) by landing events into bronze with append-only tables or staging topics—this project emphasizes **batch + periodic refresh** for clarity and reproducibility in an academic setting.
+| Service            | URL / port                          |
+|-------------------|--------------------------------------|
+| ML API (default)  | `http://localhost:8000` — `/docs`   |
+| Dashboard (Vite) | `http://localhost:5173` (default)   |
+| PostgreSQL       | `localhost:5432`                    |
+| Redis            | `localhost:6379`                    |
 
-**Storage layer**  
-- **Primary warehouse:** **PostgreSQL** with **medallion architecture** (**bronze → silver → gold**): progressive refinement, governance, and consumption-ready marts/facts/dims.  
-- **Hybrid posture:** Conceptually a **warehouse-centric** design; a **data lake** (object storage + open formats) can sit alongside for cheap archival or ML feature stores without changing the optimization loop’s core idea.
-
-**Processing layer (ETL/ELT)**  
-- Transformations promote data across tiers (cleansing, conforming, aggregating).  
-- Lineage and freshness concepts support monitoring (“is gold stale?”).
-
-**Query engine**  
-- **PostgreSQL** executes analytical and operational SQL; **pg_stat_statements** (when enabled) exposes normalized query text and timing aggregates.
-
-**Optimization / AI layer**  
-- **FastAPI** service (`ml-optimization`): collects or reads workload statistics, runs **trained models**, merges **rule-based** catalog checks, and exposes **index**, **partition**, and related recommendations to the UI and APIs.
-
-**Visualization / monitoring**  
-- **React (Vite)** dashboards: optimizations, analytics, monitoring, storage, alerts, settings.  
-- **WebSockets** (where implemented) push near–real-time updates for optimization and activity.
-
-### Data flow (step-by-step)
-
-1. **Sources → bronze:** Raw or lightly typed data lands via batch jobs.  
-2. **bronze → silver:** Cleaning, keys, conforming dimensions, denormalization as needed.  
-3. **silver → gold:** Facts/dims, aggregates, business-ready tables for BI and ML features.  
-4. **Consumers query gold/silver** (and sometimes bronze for exploration).  
-5. **PostgreSQL** records execution statistics (**pg_stat_statements**) and plans.  
-6. **Collector** materializes workload snapshots into **`ml_optimization.query_logs`** (and related state).  
-7. **ML + rules** score queries and (table, column) pairs → **recommendations** (indexes, partition hints, cache-related signals where modeled).  
-8. **Dashboards** show recommendations, monitoring KPIs, and allow **human-in-the-loop** apply/reject workflows where wired.  
-9. **Feedback:** New executions after changes refresh stats; models can be **retrained** on updated logs.
+When using **Docker integration** (`docker-compose.integration.yml`), the ML service is often exposed on **8001** and the packaged dashboard on **3000** (nginx). Point the dashboard’s `VITE_API_BASE_URL` at the URL you actually run.
 
 ---
 
-## 3. Core Innovation: Self-Optimizing Engine
+## Prerequisites
 
-### What “self-optimizing” means here
+- **Docker Desktop** (or Docker Engine + Compose) — for PostgreSQL, Redis, and optional stacks.
+- **Python 3.10+** — for the ML API, ETL, and helper scripts.
+- **Node.js 18+** and **npm** — for the dashboard.
 
-Not “the database rewrites itself with no oversight,” but a **closed loop**:
+Optional:
 
-1. **Observe** workload (queries, latency, I/O, frequency).  
-2. **Infer** pain points (slow patterns, anomalies, skewed columns).  
-3. **Recommend** concrete physical-design and tuning actions.  
-4. **Learn** from updated telemetry after changes (or from continued traffic).
-
-### Types of optimizations
-
-| Category | Role in this system |
-|----------|---------------------|
-| **Query optimization** | Identify expensive patterns; correlate with model predictions vs. actuals; surface outliers. |
-| **Indexing strategies** | Suggest B-tree (and conceptually other) indexes on high-impact (table, column) pairs seen in predicates/joins. |
-| **Partitioning** | Suggest **range-friendly** keys (time / ingest columns) when filters align with partition pruning. |
-| **Resource allocation** | Monitoring and cost/storage views support **capacity** decisions; ML can prioritize what to fix first (ROI-style ranking). |
-
-### Feedback loop
-
-- **Telemetry in:** `query_logs` + `pg_stat_statements` + optional anomaly scores.  
-- **Models update beliefs:** Retrain predictors/clusterers on fresh logs.  
-- **Rules guardrail:** Catalog validation (table/column exists, allowlisted schemas) prevents nonsense DDL.  
-- **Human or automated apply:** Apply events and audit trails (where implemented) close the loop.
+- **Git** — version control.
+- **PowerShell** — if you use the Windows helper scripts in the repo root.
 
 ---
 
-## 4. Machine Learning Component (Detailed)
+## Quick start (local development)
 
-### Problem the ML stack solves
+This is the simplest path that matches the dashboard’s **default** API base (`http://localhost:8000/api/v1`).
 
-**Primary:** Predict and rank **which access paths and workload signatures are “expensive” or “anomalous”** so the system can prioritize **index/partition/cache**-style actions instead of treating all queries equally.
+### 1. Start PostgreSQL and Redis
 
-**Secondary:** Group **workloads** (clustering) and support **cache behavior** signals where a cache predictor is trained—so optimization is not only “one query at a time” but **pattern-level**.
+From the repository root:
 
-### Type of learning
+```bash
+docker compose up -d postgres redis
+```
 
-| Technique | Use in project | Label / signal |
-|-----------|----------------|----------------|
-| **Supervised learning** | **Query execution time prediction** (regression): features from logs/plans → predict latency. | Target: `mean_exec_time_ms` (or related). |
-| **Unsupervised learning** | **Workload clustering** (e.g., k-means on query/feature vectors). | No explicit label; discovers query “families.” |
-| **Anomaly detection** | **Unsupervised / novelty detection** on query metrics (e.g., Isolation Forest–style). | “Unusual” = high severity for recommendations. |
-| **Reinforcement learning** | *Not the primary path* in this codebase; could be future work (actions = index add / partition; reward = latency/cost). | N/A today. |
+Wait until Postgres is healthy (Compose prints health status, or use `pg_isready`).
 
-### Features (examples)
+Default DB credentials (override with env vars if you change them):
 
-- **Query text–derived features:** joins, aggregations, filters, subqueries, estimated cost/rows (when EXPLAIN features are extracted).  
-- **Runtime metrics:** `mean_exec_time_ms`, `calls`, buffer hit/read counts, rows affected.  
-- **Frequency & scale proxies:** call counts, I/O, table touch patterns inferred from logs.
+- **User:** `postgres`
+- **Password:** `postgres`
+- **Database:** `datawarehouse`
 
-### Model choices (and intuition)
+### 2. Install Python dependencies (ML API)
 
-| Model | Role | Why it fits |
-|-------|------|-------------|
-| **Gradient boosting (XGBoost)** | Regression on execution time | Strong tabular performance; handles nonlinear interactions among discrete “shape” features and continuous metrics. |
-| **Tree ensembles / sklearn regressors** | Alternative or baseline predictors | Interpretable feature importances; good academic baselines. |
-| **Isolation Forest (typical anomaly pattern)** | Flag outlier workloads | Unsupervised; no need for labeled “bad queries” at scale. |
-| **k-means (or similar)** | Workload clustering | Groups queries for **cohort-level** tuning (e.g., “nightly ETL cluster”). |
+```bash
+cd ml-optimization
+python -m pip install -r requirements.txt
+cd ..
+```
 
-**Why not only deep learning?** For structured log features and moderate data sizes, **GBDTs** often win on accuracy vs. complexity and train quickly—important for a project that must **retrain** on new logs.
+If you use a virtual environment, create and activate it first, then run the same `pip install`.
 
-### Training pipeline (conceptual)
+### 3. Start the ML Optimization API
 
-1. **Collect** `query_logs` from `pg_stat_statements` / collector.  
-2. **Clean** invalid rows; align schema; cap outliers if needed.  
-3. **Feature extraction** per row (text + numeric + optional plan JSON).  
-4. **Train/validate** (holdout or cross-validation) time predictor; train anomaly detector; train clusterer.  
-5. **Serialize** artifacts under `ml-optimization/saved_models/`.  
-6. **Serve** in FastAPI: load once (cached), score live samples.
+From the **repository root** (important — the loader resolves paths from here):
 
-### Evaluation metrics
+```bash
+python start_services.py
+```
 
-| Metric | Meaning |
-|--------|---------|
-| **MAE / RMSE** (time prediction) | Average error in predicted vs. actual latency (ms). |
-| **R²** | Explained variance (guarded: can mislead on noisy logs). |
-| **Precision@k / manual review** (recommendations) | Of top-k suggested indexes, how many validated by EXPLAIN or DBA. |
-| **Latency reduction (A/B)** | Before/after index or partition on representative queries. |
-| **Cost proxy** | I/O reduction, cheaper instance size, or fewer scanned blocks. |
+You should see:
 
----
+- **API:** `http://localhost:8000`
+- **OpenAPI docs:** `http://localhost:8000/docs`
 
-## 5. Logic & Decision-Making Flow
+### 4. Start the dashboard
 
-### Step-by-step: how workload leads to optimization
+```bash
+cd dashboard
+npm install
+npm run dev
+```
 
-1. **Traffic** hits PostgreSQL; stats accumulate.  
-2. **Collector** writes/updates **`ml_optimization.query_logs`**.  
-3. On **GET /recommendations** (or websocket tick), the API **samples** recent logs and/or `pg_stat_statements`.  
-4. **Parsing heuristics** extract candidate **(schema.table, column)** pairs from SQL (qualified names, WHERE patterns, broad hints).  
-5. **Partition candidates** filter to **time/range-suitable** columns.  
-6. **ML scoring:** predictor residual or anomaly score → **severity**; groups aggregate by (type, table, column).  
-7. **Rule merge:** optional pg_stat/catalog hints, redundancy filters, allowlisted schemas.  
-8. **Output:** ranked recommendations with DDL templates; **persist** or live-merge for UI.
+Open the URL Vite prints (by default **http://localhost:5173**).
 
-### When to adapt vs. not adapt
+### 5. Optional: align environment files
 
-- **Adapt (suggest / rank high)** when evidence shows repeated access + high cost + model/anomaly severity.  
-- **Do not adapt** when: column already leading an index, table too small, schema not allowlisted, insufficient evidence (`OPTIMIZATION_MIN_QUERY_EVIDENCE_HITS`), or recommendation fails validation.
-
-### Rules + ML hybrid
-
-- **ML** proposes **priority** and surfaces **non-obvious** outliers.  
-- **Rules** enforce **safety** (real tables/columns, schema policy) and **explainability** (partition vs. index templates).
+- Copy `dashboard/.env.example` to `dashboard/.env` if you need a non-default API URL or WebSocket origin.
+- Copy `ml-optimization/.env.example` to `ml-optimization/.env` for ML tuning and Postgres-related options.
 
 ---
 
-## 6. Algorithms Used (Concise)
+## Docker
 
-| Area | Technique | Intuition |
-|------|-----------|-----------|
-| **Query optimization (advisory)** | Pattern mining over logs + EXPLAIN-derived features | “Queries that look like X tend to cost Y.” |
-| **Index recommendation** | (Table, column) grouping + scoring | Frequent filters on `customer_id` without supporting index → high benefit. |
-| **Partitioning** | Time-key detection + workload filters | Range predicates on `order_date` → prune partitions instead of scanning full history. |
-| **Clustering** | k-means on feature vectors | Discover stable workload modes (interactive BI vs. batch). |
-| **Anomaly detection** | Isolation-style on metric vectors | “This query is unusual for our fleet—inspect first.” |
-| **Regression** | XGBoost / ensemble | Map features to expected latency; big gap → suspicious or mis-tuned. |
+### Base stack (database + cache)
 
----
+```bash
+docker compose up -d postgres redis
+```
 
-## 7. Implementation Details
+### Full integration stack (ML service + API gateway + dashboard image)
 
-### Tech stack (as reflected in this repository)
+```bash
+docker compose -f docker-compose.yml -f docker-compose.integration.yml up --build
+```
 
-| Component | Technology | Rationale |
-|-----------|------------|-----------|
-| **Warehouse / engine** | **PostgreSQL** | Mature optimizer, `pg_stat_statements`, broad academic/industry familiarity. |
-| **ETL / scripts** | **Python** | Rapid data engineering, ML ecosystem integration. |
-| **ML API** | **FastAPI** | Typed APIs, async-friendly, easy OpenAPI for dashboards. |
-| **Models** | **scikit-learn**, **XGBoost**, **pandas**, **numpy** | Standard stack for tabular ML and teaching clarity. |
-| **Frontends** | **React + Vite**, TypeScript | Interactive dashboards for monitoring and optimization UX. |
-| **Real-time** | **WebSockets** (where enabled) | Live optimization/monitoring updates. |
+Services and ports are defined in `docker-compose.integration.yml` (for example ML service **8001**, API gateway **8000**, dashboard **3000** when using the bundled nginx image). Adjust `VITE_*` build args or your `.env` so the UI targets the correct backend.
 
-*Not required for the core thesis:* Kafka, Spark, Snowflake, Airflow—those can be integrated for **scale-out ingestion** or **orchestration** without changing the self-optimization concept.
+### Monitoring (Prometheus + Grafana)
 
-### Scalability
+```bash
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+```
 
-- **Vertical scaling** of PostgreSQL; **read replicas** for analytics; **partitioning** for large facts.  
-- **ML service** stateless aside from models—scale API replicas; **batch retraining** off-peak.
+Grafana is typically mapped to host port **3001** (see `docker-compose.monitoring.yml`).
 
-### Fault tolerance
+### Development ETL (Airflow)
 
-- Collector and API failures should **degrade gracefully**: fall back to last `query_logs` snapshot or rule-only hints.  
-- **Idempotent** ETL and recommendation persistence reduce duplicate apply risk.
+Optional Airflow services are in `docker-compose.dev.yml`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+Airflow UI is mapped to **8081** on the host in that file.
 
 ---
 
-## 8. Performance Results (How to Report Honestly)
+## Dashboard configuration
 
-This section should match **your measured** runs. Use the following **template** in presentations; fill with your numbers.
+| Variable | Purpose |
+|----------|---------|
+| `VITE_API_BASE_URL` | REST prefix for the ML API (default in code: `http://localhost:8000/api/v1`). |
+| `VITE_WS_BASE_URL` | Optional WebSocket origin if it differs from the API origin. |
+| `VITE_ANALYTICS_POLL_MS` | Optional analytics polling interval (ms). |
 
-| Scenario | Before | After | Delta |
-|----------|--------|-------|-------|
-| Representative aggregate on fact table | e.g. 4.2 s | e.g. 0.35 s | ~12× faster |
-| High-selectivity filter query | e.g. seq scan | index scan | X% buffer reads avoided |
-| Storage / churn | baseline | partitioned prune | fewer blocks touched |
-
-**Suggested measurement protocol**
-
-1. Record **p50/p95 latency** for 5–10 canonical queries.  
-2. Apply **one** high-confidence index or partition template.  
-3. **VACUUM/ANALYZE** as appropriate; replay load; compare.  
-4. Capture **EXPLAIN (ANALYZE, BUFFERS)** before/after screenshots for slides.
-
-If you only have **simulated** loads (e.g., `scripts/ml-optimization/run_ml_index_partition_workload.py`), state clearly: *“synthetic workload; results illustrate mechanism, not production SLAs.”*
+See `dashboard/.env.example` for comments and examples.
 
 ---
 
-## 9. Challenges & Trade-offs
+## ETL pipeline
 
-| Challenge | Impact | Mitigation |
-|-----------|--------|------------|
-| **Data drift** | Model trained on old workload underperforms on new apps. | Periodic retrain; monitor MAE; decay old logs. |
-| **Model retraining cost** | Training windows and feature drift. | Scheduled jobs; incremental data selection. |
-| **Optimization overhead** | Index builds lock I/O; `CONCURRENTLY` reduces but does not eliminate pain. | Maintenance windows; prioritize high-ROI. |
-| **Cold start** | Few logs → weak recommendations. | Bootstrap from pg_stat; seed workloads; lower evidence thresholds in dev only. |
-| **False positives** | Bad index suggestions. | Catalog validation + human approval + EXPLAIN checks. |
+- Main runner: `etl/scripts/run_etl.py` (Bronze → Silver → Gold).  
+- Logs append to `etl/scripts/etl_pipeline.log` when file logging is enabled.
+- Cron-style Windows runner: `etl/scripts/run_etl_cron.ps1` (see script header for Task Scheduler usage).
+
+Ensure PostgreSQL is up and schemas/tables exist per your initialization scripts under `infrastructure/docker/postgres/init-scripts` before running heavy loads.
 
 ---
 
-## 10. Future Improvements
+## Optional tooling
 
-- **Autonomous schema evolution** with governance (approved migrations, versioned DDL).  
-- **RL-based optimizer** treating actions (add index / split partition) with reward = latency + dollar cost.  
-- **Cloud-native integration** (managed Postgres, object storage, serverless ETL).  
-- **Stronger streaming path** (CDC → bronze) for near–real-time marts.  
-- **Multi-tenant recommendation** policies (per team cost centers).
-
----
-
-## 11. Demo Walkthrough Script (2–3 Minutes)
-
-**Opening (15 s)**  
-> “This is a PostgreSQL medallion warehouse with an ML layer that turns real query telemetry into ranked physical-design recommendations—indexes and partitions—instead of relying only on manual tuning.”
-
-**Architecture (30 s)**  
-> “Data moves bronze → silver → gold. PostgreSQL records how queries behave. A collector feeds `query_logs`. FastAPI loads trained models and merges rules so recommendations are both data-driven and safe for the catalog.”
-
-**ML punch (45 s)**  
-> “We use supervised regression to predict execution time from query features and runtime stats, plus anomaly detection for outliers, and clustering for workload families. That tells us *where* the pain is—not just *that* CPU is high.”
-
-**Live demo (45–60 s)**  
-1. Show **dashboard → Optimizations**: recommendations list with index vs. partition.  
-2. Open **one** recommendation: show **reason**, **estimated benefit**, and **DDL template**.  
-3. Optionally show **monitoring** (freshness, ETL) to connect “data quality” to “query behavior.”  
-4. Mention **human approval** before apply in production.
-
-**Closing (15 s)**  
-> “The innovation is the closed loop: observe → model → recommend → validate → retrain. That’s what makes the warehouse *self-optimizing* in a practical, engineering sense.”
-
-**Emphasize to the professor**
-
-- **Medallion + ML** = governance *and* intelligence.  
-- **Hybrid rules + ML** = safety *and* adaptivity.  
-- **Measurable** before/after on representative queries—even on a student-scale DB, the *method* is what you are graded on.
+| Item | Description |
+|------|-------------|
+| `START_DASHBOARD_AND_API.ps1` | Windows: starts API gateway script path + `dashboard` dev server (review paths if your gateway entrypoint differs). |
+| `run_project.ps1` | Windows: checks Postgres, starts ML API + dashboard in separate windows. |
+| `scripts/start_dashboard.py` | Starts API + dashboard from one terminal (paths may point at `api-gateway`; prefer `start_services.py` + `npm run dev` if in doubt). |
+| `watch_etl*.ps1`, `monitor_etl*.ps1`, `quick_etl_check.ps1` | Windows helpers for ETL progress monitoring. |
 
 ---
 
-## 12. Quick Start (Operational Pointers)
+## Repository layout
 
-- Start API: `python start_services.py` (from project root; see script for route loading).  
-- Train models: `scripts/ml-optimization/train_all_models.py` (and related scripts).  
-- Collect logs: `scripts/ml-optimization/run_query_collection.py`.  
-- Stress / demo workload: `scripts/ml-optimization/run_ml_index_partition_workload.py`.
+| Path | Role |
+|------|------|
+| `ml-optimization/` | FastAPI app, ML models, routes, `requirements.txt`. |
+| `dashboard/` | Vite + React UI, `Dockerfile` / `nginx.conf` for production image. |
+| `api-gateway/` | Optional gateway service (used in Docker integration when built). |
+| `etl/` | Pipelines, DAGs, scripts, scheduler. |
+| `infrastructure/` | Docker configs for Postgres, Prometheus, Grafana, etc. |
+| `scripts/` | Utilities, migrations, one-off helpers. |
+| `start_services.py` | **Recommended** local entrypoint for the ML API on port **8000**. |
+| `docker-compose*.yml` | Compose stacks for core, dev, monitoring, integration. |
+| `system log/` | `system_activity.log` append target for dashboard/system events (created by the API when logging). |
 
 ---
 
-*This README is written for final-year engineering evaluation: it balances intuition, system thinking, and enough ML depth to defend design choices in Q&A.*
+## Troubleshooting
+
+- **Dashboard shows API errors** — Confirm `python start_services.py` is running and that `VITE_API_BASE_URL` matches the host/port (including `/api/v1` suffix).
+- **CORS / WebSocket issues** — Check `VITE_WS_BASE_URL` and that the backend allows your dashboard origin (see ML API CORS settings in `ml-optimization/api/main.py`).
+- **Postgres connection refused** — Run `docker compose up -d postgres` and verify port **5432** is not used by another instance.
+- **Windows asyncio noise** — `start_services.py` already sets a Selector event loop policy where needed; use that script from repo root.
+
+---
+
+## License
+
+See `LICENSE` in the repository root (placeholder until you add MIT, Apache-2.0, or your institution’s terms).
+
+---
+
+## Contributing / course use
+
+Keep secrets out of Git (use `.env`, not committed). The repo ignores common artifacts such as `node_modules/`, `dist/`, virtualenvs, and `*.log` per `.gitignore`.

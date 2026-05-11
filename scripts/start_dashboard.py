@@ -44,10 +44,10 @@ def start_api_gateway():
 def start_dashboard():
     """Start the React dashboard."""
     print("\n" + "=" * 60)
-    print("Starting Monitoring Dashboard...")
+    print("Starting Dashboard...")
     print("=" * 60)
     
-    dashboard_dir = Path(__file__).parent.parent / "monitoring-dashboard"
+    dashboard_dir = Path(__file__).parent.parent / "dashboard"
     
     # Check if node_modules exists
     if not (dashboard_dir / "node_modules").exists():

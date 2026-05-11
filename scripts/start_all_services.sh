@@ -44,9 +44,9 @@ if [ -f "api-gateway/Dockerfile" ]; then
     echo "✓ API Gateway starting"
 fi
 
-# Start Monitoring Dashboard (if configured)
-if [ -f "monitoring-dashboard/Dockerfile" ]; then
-    echo "Starting Monitoring Dashboard..."
+# Start web dashboard (if configured)
+if [ -f "dashboard/Dockerfile" ]; then
+    echo "Starting Dashboard..."
     docker-compose up -d dashboard
     echo "✓ Dashboard starting"
 fi
@@ -77,7 +77,7 @@ if docker-compose ps | grep -q "api-gateway"; then
     echo "API Gateway: http://localhost:8000"
 fi
 if docker-compose ps | grep -q "dashboard"; then
-    echo "Monitoring Dashboard: http://localhost:3000"
+    echo "Web Dashboard: http://localhost:3000"
 fi
 if docker-compose ps | grep -q "grafana"; then
     echo "Grafana: http://localhost:3001"

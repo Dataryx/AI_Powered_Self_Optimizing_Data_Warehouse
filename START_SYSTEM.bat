@@ -46,8 +46,8 @@ echo ✓ API Gateway starting (separate window)
 echo.
 
 REM Start Dashboard
-echo [4/4] Starting Monitoring Dashboard...
-cd monitoring-dashboard
+echo [4/4] Starting Dashboard...
+cd dashboard
 start "Dashboard" cmd /k "npm run dev"
 cd ..
 echo ✓ Dashboard starting (separate window)

@@ -76,8 +76,8 @@ Write-Host "  [OK] API starting in new window" -ForegroundColor Green
 
 # Start Dashboard
 Write-Host ""
-Write-Host "[3/3] Starting Monitoring Dashboard..." -ForegroundColor Yellow
-$dashboardPath = Join-Path $projectRoot "monitoring-dashboard"
+Write-Host "[3/3] Starting Dashboard..." -ForegroundColor Yellow
+$dashboardPath = Join-Path $projectRoot "dashboard"
 if (Test-Path $dashboardPath) {
     Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$dashboardPath'; Write-Host 'Monitoring Dashboard' -ForegroundColor Green; npm run dev"
     Start-Sleep -Seconds 2

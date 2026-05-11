@@ -34,8 +34,8 @@ if (Test-Path $apiDir) {
 
 # Start Dashboard
 Write-Host ""
-Write-Host "[2/2] Starting Monitoring Dashboard..." -ForegroundColor Yellow
-$dashboardDir = Join-Path $scriptDir "monitoring-dashboard"
+Write-Host "[2/2] Starting Dashboard..." -ForegroundColor Yellow
+$dashboardDir = Join-Path $scriptDir "dashboard"
 if (Test-Path $dashboardDir) {
     Set-Location $dashboardDir
     
