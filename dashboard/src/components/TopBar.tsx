@@ -15,7 +15,6 @@ import {
   Table2,
   Lightbulb,
   BarChart3,
-  Settings,
 } from 'lucide-react';
 import type { DashboardData } from '../hooks/useDashboardData';
 import { api } from '../services/api';
@@ -95,7 +94,6 @@ const mobileNav = [
   { to: '/optimizations', label: 'Optimizations', icon: Lightbulb },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/alerts', label: 'Alerts', icon: Bell },
-  { to: '/settings', label: 'Settings', icon: Settings },
 ] as const;
 
 export default function TopBar({ data = null, loading = false, connectionError = null }: TopBarProps) {

@@ -7,7 +7,9 @@ Incremental ETL:
   that exist in silver but not yet in gold (NOT EXISTS), so append-only bronze/silver loads extend gold.
 - dim_customer / dim_promotion: already merge via NOT EXISTS or ON CONFLICT.
 - fact_sales / fact_orders: full DELETE + INSERT from silver each run (current truth).
-- fact_inventory_snapshot: DELETE for the snapshot date_key, then INSERT (refresh that day).
+- fact_inventory_snapshot: incremental per snapshot date — carry forward unchanged rows from the
+  previous snapshot date, INSERT new/changed keys from silver, UPDATE rows when silver differs from
+  gold for that date, DELETE keys no longer in silver. Use force_refresh=True to clear that date first.
 - agg_customer_lifetime, agg_monthly_product_sales, agg_sales_rep_performance: DELETE all then
   rebuild from silver each run so summaries match new orders/customers.
 - agg_daily_sales: per-date inserts; missing dates are filled in aggregate_all().
@@ -15,7 +17,7 @@ Incremental ETL:
 
 import psycopg2
 from datetime import datetime, date, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import logging
 import time
 
@@ -1114,23 +1116,42 @@ class SilverToGoldAggregator:
             logger.error(f"[ERROR] Error incrementally populating fact_orders: {e}", exc_info=True)
             return 0
     
+    def _previous_inventory_snapshot_date_key(self, date_key: int) -> Optional[int]:
+        self.cursor.execute(
+            """
+            SELECT MAX(snapshot_date_key)
+            FROM gold.fact_inventory_snapshot
+            WHERE snapshot_date_key < %s
+            """,
+            (date_key,),
+        )
+        row = self.cursor.fetchone()
+        if not row or row[0] is None:
+            return None
+        return int(row[0])
+
     def populate_fact_inventory_snapshot(self, snapshot_date: date = None, force_refresh: bool = False):
         """Populate fact_inventory_snapshot from silver.inventory for one snapshot date.
 
-        Replaces rows for that date_key each run so inventory changes are reflected.
+        Incremental load when a prior snapshot exists for an earlier date: carry forward unchanged
+        (product + warehouse) rows from that snapshot, INSERT missing keys from silver, UPDATE rows
+        where silver-derived measures differ from gold for this date, DELETE keys no longer in silver.
+
+        If there is no prior snapshot row in gold, falls back to a full INSERT from silver (cold start).
+
+        Set force_refresh=True to DELETE all rows for this snapshot_date_key first, then reload.
         """
         if snapshot_date is None:
             snapshot_date = date.today()
-        
+
         date_key = int(snapshot_date.strftime('%Y%m%d'))
-        
+
         logger.info(f"Populating inventory snapshot fact for {snapshot_date}...")
-        
+
         # Ensure date dimension exists (populate_dim_date skips when table not empty, so insert single date if missing)
         self.cursor.execute("SELECT 1 FROM gold.dim_date WHERE date_key = %s", (date_key,))
         if not self.cursor.fetchone():
             self.populate_dim_date(snapshot_date, snapshot_date)
-            # If dim_date had other rows, populate_dim_date may have skipped; ensure this date exists
             self.cursor.execute("SELECT 1 FROM gold.dim_date WHERE date_key = %s", (date_key,))
             if not self.cursor.fetchone():
                 day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -1158,15 +1179,8 @@ class SilverToGoldAggregator:
                     False, '', d.year, quarter, d.month,
                 ))
                 self.connection.commit()
-        
-        if force_refresh:
-            self.cursor.execute(
-                "DELETE FROM gold.fact_inventory_snapshot WHERE snapshot_date_key = %s",
-                (date_key,),
-            )
-            logger.debug("populate_fact_inventory_snapshot: force_refresh=True (snapshot date cleared)")
-        
-        query = """
+
+        insert_from_silver_sql = """
             INSERT INTO gold.fact_inventory_snapshot (
                 snapshot_date_key, product_key, warehouse_key,
                 quantity_on_hand, quantity_available, quantity_reserved,
@@ -1200,13 +1214,157 @@ class SilverToGoldAggregator:
                     AND f.warehouse_key = i.warehouse_key
               )
         """
-        
+
+        update_from_silver_sql = """
+            UPDATE gold.fact_inventory_snapshot AS g
+            SET
+                quantity_on_hand = src.quantity_on_hand,
+                quantity_available = src.quantity_available,
+                quantity_reserved = src.quantity_reserved,
+                days_of_supply = src.days_of_supply,
+                stock_status = src.stock_status,
+                inventory_value = src.inventory_value
+            FROM (
+                SELECT
+                    i.product_key,
+                    i.warehouse_key,
+                    COALESCE(i.quantity_on_hand, 0) AS quantity_on_hand,
+                    COALESCE(i.quantity_available, 0) AS quantity_available,
+                    COALESCE(i.quantity_reserved, 0) AS quantity_reserved,
+                    CASE
+                        WHEN COALESCE(i.quantity_available, 0) <= 0 THEN 0
+                        ELSE LEAST(999, GREATEST(0, (i.quantity_on_hand / NULLIF(i.quantity_available, 0))::INT))
+                    END AS days_of_supply,
+                    CASE
+                        WHEN COALESCE(i.quantity_available, 0) <= 0 THEN 'OUT_OF_STOCK'
+                        WHEN COALESCE(i.quantity_available, 0) < 10 THEN 'LOW_STOCK'
+                        ELSE 'IN_STOCK'
+                    END AS stock_status,
+                    ROUND(COALESCE(i.quantity_on_hand, 0) * COALESCE(p.list_price, 0), 2) AS inventory_value
+                FROM silver.inventory i
+                LEFT JOIN silver.product p ON i.product_key = p.product_key AND p.is_valid = TRUE
+                WHERE i.is_valid = TRUE
+            ) AS src
+            WHERE g.snapshot_date_key = %s
+              AND g.product_key = src.product_key
+              AND g.warehouse_key = src.warehouse_key
+              AND (
+                  g.quantity_on_hand IS DISTINCT FROM src.quantity_on_hand
+                  OR g.quantity_available IS DISTINCT FROM src.quantity_available
+                  OR g.quantity_reserved IS DISTINCT FROM src.quantity_reserved
+                  OR g.days_of_supply IS DISTINCT FROM src.days_of_supply
+                  OR g.stock_status IS DISTINCT FROM src.stock_status
+                  OR g.inventory_value IS DISTINCT FROM src.inventory_value
+              )
+        """
+
+        delete_orphans_sql = """
+            DELETE FROM gold.fact_inventory_snapshot AS g
+            WHERE g.snapshot_date_key = %s
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM silver.inventory i
+                  WHERE i.product_key = g.product_key
+                    AND i.warehouse_key = g.warehouse_key
+                    AND i.is_valid = TRUE
+              )
+        """
+
+        carry_forward_sql = """
+            INSERT INTO gold.fact_inventory_snapshot (
+                snapshot_date_key, product_key, warehouse_key,
+                quantity_on_hand, quantity_available, quantity_reserved,
+                days_of_supply, stock_status, inventory_value
+            )
+            SELECT
+                %s AS snapshot_date_key,
+                f.product_key,
+                f.warehouse_key,
+                f.quantity_on_hand,
+                f.quantity_available,
+                f.quantity_reserved,
+                f.days_of_supply,
+                f.stock_status,
+                f.inventory_value
+            FROM gold.fact_inventory_snapshot f
+            INNER JOIN silver.inventory i
+                ON i.product_key = f.product_key
+               AND i.warehouse_key = f.warehouse_key
+               AND i.is_valid = TRUE
+            WHERE f.snapshot_date_key = %s
+              AND COALESCE(i.quantity_on_hand, 0) = f.quantity_on_hand
+              AND COALESCE(i.quantity_available, 0) = f.quantity_available
+              AND COALESCE(i.quantity_reserved, 0) = f.quantity_reserved
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM gold.fact_inventory_snapshot g
+                  WHERE g.snapshot_date_key = %s
+                    AND g.product_key = f.product_key
+                    AND g.warehouse_key = f.warehouse_key
+              )
+        """
+
         try:
-            self.cursor.execute(query, (date_key, date_key))
-            count = self.cursor.rowcount
+            if force_refresh:
+                self.cursor.execute(
+                    "DELETE FROM gold.fact_inventory_snapshot WHERE snapshot_date_key = %s",
+                    (date_key,),
+                )
+                logger.debug("populate_fact_inventory_snapshot: force_refresh=True (snapshot date cleared)")
+
+            prev_key = self._previous_inventory_snapshot_date_key(date_key)
+            carried = 0
+            inserted = 0
+            updated = 0
+            deleted = 0
+
+            if prev_key is None:
+                self.cursor.execute(insert_from_silver_sql, (date_key, date_key))
+                inserted = self.cursor.rowcount
+                logger.info(
+                    "Inventory snapshot cold start (no prior snapshot date in gold): inserted %s rows from silver",
+                    f"{inserted:,}",
+                )
+            else:
+                self.cursor.execute(carry_forward_sql, (date_key, prev_key, date_key))
+                carried = self.cursor.rowcount
+                self.cursor.execute(insert_from_silver_sql, (date_key, date_key))
+                inserted = self.cursor.rowcount
+                logger.info(
+                    "Inventory snapshot incremental: prev_date_key=%s, carried_forward=%s, "
+                    "inserted_new_or_changed=%s",
+                    prev_key,
+                    f"{carried:,}",
+                    f"{inserted:,}",
+                )
+
+            self.cursor.execute(update_from_silver_sql, (date_key,))
+            updated = self.cursor.rowcount
+            if updated:
+                logger.info(
+                    "Inventory snapshot aligned gold with silver (updates for snapshot date): %s rows",
+                    f"{updated:,}",
+                )
+
+            self.cursor.execute(delete_orphans_sql, (date_key,))
+            deleted = self.cursor.rowcount
+            if deleted:
+                logger.info("Inventory snapshot removed %s orphan rows (no longer in silver)", f"{deleted:,}")
+
+            self.cursor.execute(
+                "SELECT COUNT(*) FROM gold.fact_inventory_snapshot WHERE snapshot_date_key = %s",
+                (date_key,),
+            )
+            total_for_date = self.cursor.fetchone()[0]
+
             self.connection.commit()
-            logger.info(f"Populated {count:,} inventory snapshot records for {snapshot_date}")
-            return count
+            logger.info(
+                "Inventory snapshot for %s: total rows for date_key=%s is %s",
+                snapshot_date,
+                date_key,
+                f"{total_for_date:,}",
+            )
+            return int(total_for_date)
         except Exception as e:
             logger.error(f"Error populating inventory snapshot: {e}", exc_info=True)
             self.connection.rollback()

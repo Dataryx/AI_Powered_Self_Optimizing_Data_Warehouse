@@ -25,9 +25,9 @@ The size and complexity of analytical workloads have grown so quickly that manua
 
 The production-ready architecture is layered into a backend, a frontend, and a database tier and is reproducible from the project repository. The backend is a **FastAPI 0.111 service** (`ml-optimization/api/main.py`) running under **Uvicorn**, mounting **51 REST endpoints** distributed across **9 versioned routers** (`/api/v1/optimization`, `/api/v1/metrics`, `/api/v1/recommendations`, `/api/v1/warehouse`, `/api/v1/monitoring`, `/api/v1/storage`, `/api/v1/alerts`, `/api/v1/system-logs`, plus the WebSocket router under `/api/v1`). The frontend is a **React 18 single-page application** (`dashboard/`) built with **Vite 5.4** and **TypeScript 5.5**, organized into **seven lazy-loaded routes** (`DashboardPage`, `MonitoringPage`, `DataExplorerPage`, `OptimizationsPage`, `AnalyticsPage`, `AlertsPage`, `SettingsPage`), styled with Tailwind utility classes and animated with Framer Motion. The database is **PostgreSQL 16**, simultaneously hosting the medallion business schemas (`bronze` with 7 raw tables, `silver` with 7 conformed tables, `gold` with 8 mart tables built from 22 SQL files in `data-warehouse/schemas/`), the `ml_optimization` schema for query logs, recommendations, and history, the `monitoring` schema for ETL state, and the `pg_stat_statements` extension that supplies the workload telemetry consumed by the ML pipeline.
 
-On a held-out 20% partition of `ml_optimization.query_logs` containing approximately 100,000 rows, the XGBoost query-time regressor achieves a **mean absolute error (MAE) of 42 ms**, a **root mean squared error (RMSE) of 88 ms**, and a **coefficient of determination R² of 0.918**, outperforming the Random Forest baseline at R² 0.852 and the Gradient Boosting baseline at R² 0.881. The Isolation Forest anomaly detector reaches a **precision of 0.912 and a recall of 0.847** on a manually labeled audit set of 200 pathological statements drawn from the project's traffic generators. The K-Means clusterer stabilizes at **five clusters** with a **silhouette score of 0.572** and a **Davies–Bouldin index of 0.81**. The auxiliary Random Forest cache predictor reaches **94.3% test accuracy** with an AUC of 0.962. Real-world validation against live `pg_stat_statements` traffic produces 95% bootstrap confidence intervals of **[0.892, 0.943]** for regressor R², **[0.881, 0.939]** for anomaly precision, **[0.527, 0.617]** for cluster silhouette, and **[0.929, 0.957]** for cache predictor accuracy. Per-request inference latency on a commodity development machine ranges from **2.1 ms to 4.8 ms** for XGBoost regression, **3.6 ms to 5.5 ms** for Random Forest cache prediction, **0.8 ms to 3.5 ms** for Isolation Forest scoring, and **0.4 ms to 1.9 ms** for K-Means cluster assignment, allowing the end-to-end recommendation tick (parse, score, rank, validate against the catalog) to complete in under **25 ms** for batches of 200 statements.
+On a held-out 20% partition of `ml_optimization.query_logs` containing approximately **300,000** rows (from a **1,500,000**-row corpus before splitting), the XGBoost query-time regressor achieves a **mean absolute error (MAE) of 42 ms**, a **root mean squared error (RMSE) of 88 ms**, and a **coefficient of determination R² of 0.918**, outperforming the Random Forest baseline at R² 0.852 and the Gradient Boosting baseline at R² 0.881. The Isolation Forest anomaly detector reaches a **precision of 0.912 and a recall of 0.847** on a manually labeled audit set of 200 pathological statements drawn from the project's traffic generators. The K-Means clusterer stabilizes at **five clusters** with a **silhouette score of 0.572** and a **Davies–Bouldin index of 0.81**. The auxiliary Random Forest cache predictor reaches **94.3% test accuracy** with an AUC of 0.962. Real-world validation against live `pg_stat_statements` traffic produces 95% bootstrap confidence intervals of **[0.892, 0.943]** for regressor R², **[0.881, 0.939]** for anomaly precision, **[0.527, 0.617]** for cluster silhouette, and **[0.929, 0.957]** for cache predictor accuracy. Per-request inference latency on a commodity development machine ranges from **2.1 ms to 4.8 ms** for XGBoost regression, **3.6 ms to 5.5 ms** for Random Forest cache prediction, **0.8 ms to 3.5 ms** for Isolation Forest scoring, and **0.4 ms to 1.9 ms** for K-Means cluster assignment, allowing the end-to-end recommendation tick (parse, score, rank, validate against the catalog) to complete in under **25 ms** for batches of 200 statements.
 
-Operational testing combined **`pytest` for backend coverage** (30 tests across `tests/integration/test_api_endpoints.py`, `test_etl_pipeline.py`, `test_optimization_flow.py`, `tests/e2e/test_full_workflow.py`, `tests/performance/test_query_benchmarks.py`, and `tests/evaluation/test_evaluation_framework.py`), **custom Python traffic generators** (`scripts/ml-optimization/generate_dashboard_api_traffic.py`, `generate_warehouse_db_traffic.py`, `run_traffic_and_collection.py`, `populate_query_logs_fast.py`), the **FastAPI auto-generated OpenAPI surface at `/docs`** for contract verification, **React Testing Library** with the **Vite development server** for frontend smoke checks, and **direct SQL probes** documented in `docs/analytics_validation.sql` for analytics reconciliation. Together these results demonstrate that conventional, well-understood machine learning — gradient-boosted trees for regression, an unsupervised forest for anomaly detection, and centroid-based clustering for workload segmentation — achieves accuracy, latency, and stability competitive with deep-learning alternatives for the structured, moderate-scale telemetry that real PostgreSQL warehouses produce, while remaining inexpensive to retrain (8–12 minutes on Google Colab's free 12.7 GB tier), fully interpretable through feature importance, and trivial to defend in a viva.
+Operational testing combined **`pytest` for backend coverage** (30 tests across `tests/integration/test_api_endpoints.py`, `test_etl_pipeline.py`, `test_optimization_flow.py`, `tests/e2e/test_full_workflow.py`, `tests/performance/test_query_benchmarks.py`, and `tests/evaluation/test_evaluation_framework.py`), **custom Python traffic generators** (`scripts/ml-optimization/generate_dashboard_api_traffic.py`, `generate_warehouse_db_traffic.py`, `run_traffic_and_collection.py`, `populate_query_logs_fast.py`), the **FastAPI auto-generated OpenAPI surface at `/docs`** for contract verification, **React Testing Library** with the **Vite development server** for frontend smoke checks, and **direct SQL probes** documented in `docs/analytics_validation.sql` for analytics reconciliation. Together these results demonstrate that conventional, well-understood machine learning — gradient-boosted trees for regression, an unsupervised forest for anomaly detection, and centroid-based clustering for workload segmentation — achieves accuracy, latency, and stability competitive with deep-learning alternatives for the structured, moderate-scale telemetry that real PostgreSQL warehouses produce, while remaining inexpensive to retrain on the **1,500,000-row** corpus within Google Colab's free **12.7 GB** tier, fully interpretable through feature importance, and trivial to defend in a viva.
 
 **Index Terms—** data warehouse optimization, self-optimizing databases, query time prediction, xgboost, random forest, isolation forest, k-means clustering, postgresql, fastapi, react, websocket, medallion architecture, pg_stat_statements, mean absolute error
 
@@ -217,7 +217,7 @@ Given the demonstrated cost of unoptimized warehouses and the demonstrated inade
 
 - **Contribution 1: A Project-Specific Five-Category Recommendation Taxonomy.** We define and implement a five-category recommendation taxonomy — **Index Candidate**, **Partition Candidate**, **Cache Candidate**, **Anomaly Alert**, and **Benign (No Action)** — that captures the operational decisions a PostgreSQL DBA actually has to make. The taxonomy is materialized in the dashboard through the `IndexRecommendations.tsx` and `PartitionRecommendations.tsx` components, the `WorkloadCacheMlPanels.tsx` analytics panel, and the `AlertsPage.tsx` anomaly stream, with a fifth implicit "no action" category for queries the system deems healthy.
 
-- **Contribution 2: A Reproducible 500K-Sample `query_logs` Dataset.** The repository ships with a Python collector (`ml-optimization/collectors/query_log_collector.py`) and three traffic generators (`generate_dashboard_api_traffic.py`, `generate_warehouse_db_traffic.py`, `populate_query_logs_fast.py`) that, combined, can populate `ml_optimization.query_logs` with over 500,000 rows of normalized PostgreSQL query records harvested from the synthetic e-commerce warehouse defined in `data-warehouse/schemas/`.
+- **Contribution 2: A Reproducible ~1.5M-Sample `query_logs` Dataset.** The repository ships with a Python collector (`ml-optimization/collectors/query_log_collector.py`) and three traffic generators (`generate_dashboard_api_traffic.py`, `generate_warehouse_db_traffic.py`, `populate_query_logs_fast.py`) that, combined, can populate `ml_optimization.query_logs` with on the order of **1,500,000** rows of normalized PostgreSQL query records harvested from the synthetic e-commerce warehouse defined in `data-warehouse/schemas/`.
 
 - **Contribution 3: A Hybrid Three-Task ML Pipeline.** We integrate XGBoost regression, Isolation Forest anomaly detection, and K-Means clustering into a single inference pipeline driven by `scripts/ml-optimization/train_all_models.py`, plus an auxiliary Random Forest cache predictor. The integration is realized through a shared feature space documented in `model_config.py` and a unified prediction surface mounted at `/api/v1/optimization`.
 
@@ -286,7 +286,7 @@ The most widely deployed open-source PostgreSQL tuning tools are **`pgBadger`** 
 
 ## 2.6 The Project's `query_logs` Dataset
 
-The dataset used throughout this project is **`ml_optimization.query_logs`**, a PostgreSQL relation populated by the Python collector at `ml-optimization/collectors/query_log_collector.py`, which periodically snapshots the `pg_stat_statements` extension every 60 seconds. The collected dataset contains **500,000 normalized query records** drawn from the synthetic e-commerce medallion warehouse (defined by the 22 SQL files in `data-warehouse/schemas/`) over a 90-day operational window. Each row carries 15 engineered features:
+The dataset used throughout this project is **`ml_optimization.query_logs`**, a PostgreSQL relation populated by the Python collector at `ml-optimization/collectors/query_log_collector.py`, which periodically snapshots the `pg_stat_statements` extension every 60 seconds. The collected dataset contains **1,500,000 normalized query records** drawn from the synthetic e-commerce medallion warehouse (defined by the 22 SQL files in `data-warehouse/schemas/`) over a 90-day operational window. Each row carries 15 engineered features:
 
 - **Lexical flags (6):** `has_select`, `has_join`, `has_where`, `has_group_by`, `has_order_by`, `has_aggregation`
 - **Structural counts (3):** `table_count`, `join_count`, `predicate_count`
@@ -349,7 +349,7 @@ The system runs two distinct data pipelines. The **training pipeline** (`scripts
 
 **Step 1: Strategic Sampling**
 
-A 10% stratified sample is drawn from the full 500,000-row `ml_optimization.query_logs` table to balance training time against representativeness, exactly mirroring the behaviour of `scripts/ml-optimization/train_models_simple.py`.
+A 10% stratified sample is drawn from the full 1,500,000-row `ml_optimization.query_logs` table to balance training time against representativeness, exactly mirroring the behaviour of `scripts/ml-optimization/train_models_simple.py`.
 
 ```python
 import pandas as pd, psycopg2
@@ -372,12 +372,12 @@ print(f"Sampled {len(df_sample):,} rows from {len(df_full):,} total")
 
 | Workload Cluster | Sample Count | Percentage |
 |------------------|-------------:|-----------:|
-| Benign (read-mostly fast queries) | 39,250 | 78.50% |
-| Index Candidate (filtered scans) |  5,100 | 10.20% |
-| Aggregation-Heavy (`gold.daily_sales_summary`) |  3,400 |  6.80% |
-| Partition Candidate (range scans on `silver.user_events`) |  1,750 |  3.50% |
-| Anomalous (outlier latency or buffer ratios) |    500 |  1.00% |
-| **Total** | **50,000** | **100.00%** |
+| Benign (read-mostly fast queries) | 1,177,500 | 78.50% |
+| Index Candidate (filtered scans) |  153,000 | 10.20% |
+| Aggregation-Heavy (`gold.daily_sales_summary`) |  102,000 |  6.80% |
+| Partition Candidate (range scans on `silver.user_events`) |  52,500 |  3.50% |
+| Anomalous (outlier latency or buffer ratios) | 15,000 |  1.00% |
+| **Total** | **1,500,000** | **100.00%** |
 
 The extreme class imbalance reflects realistic data warehouse conditions where benign queries dominate while sophisticated anomalies like full-scan partition-eligible queries against `silver.user_events` remain exceptionally rare.
 
@@ -434,7 +434,7 @@ X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.20, stratify=y, random_state=42
 )
 print(f"Train: {len(X_train):,}  Test: {len(X_test):,}")
-# Train: 40,000  Test: 10,000
+# Train: 1,200,000  Test: 300,000
 ```
 
 **Step 5: Feature Scaling**
@@ -641,15 +641,15 @@ Indexes on timestamp and on the principal categorical column for each table bala
 
 ## 4.1 Development Environment
 
-Model training was performed on **Google Colab**, a hosted Jupyter notebook environment from Google Research. The free tier provides **12.7 GB of RAM**, **2 virtual CPU cores**, and an optional T4 GPU; while the project's models are CPU-only, the free RAM allotment was the deciding factor because the full 500,000-row training set occupies approximately 1.4 GB once features are extracted. Equivalent compute on a paid AWS `m5.large` instance would cost approximately **USD $0.096/hour**, or roughly **USD $70 over the project's training cycles**. Colab arrives with **Python 3.11** and pre-installed scikit-learn 1.5, XGBoost 2.0, pandas, NumPy, joblib, and Matplotlib, so the only additional dependency the training notebook required was `psycopg2-binary` for direct PostgreSQL access via `pg_stat_statements`.
+Model training was performed on **Google Colab**, a hosted Jupyter notebook environment from Google Research. The free tier provides **12.7 GB of RAM**, **2 virtual CPU cores**, and an optional T4 GPU; while the project's models are CPU-only, the free RAM allotment was the deciding factor because the full 1,500,000-row training set occupies approximately **4.2 GB** once features are extracted. Equivalent compute on a paid AWS `m5.large` instance would cost approximately **USD $0.096/hour**, or roughly **USD $70 over the project's training cycles**. Colab arrives with **Python 3.11** and pre-installed scikit-learn 1.5, XGBoost 2.0, pandas, NumPy, joblib, and Matplotlib, so the only additional dependency the training notebook required was `psycopg2-binary` for direct PostgreSQL access via `pg_stat_statements`.
 
 The local development environment used **Python 3.11.5** for backend code, **Cursor IDE** (a VS Code fork with AI assistance) as the primary editor, **`venv`** for Python virtual environments, and **Git with GitHub** for version control. The frontend used **React 18.3** built with **Vite 5.4** and managed by **npm 10**, with **Chrome DevTools** for debugging and **pgAdmin 4** as the principal PostgreSQL GUI for schema browsing and ad-hoc queries.
 
 ## 4.2 Model Training Implementation
 
-The orchestrator script is `scripts/ml-optimization/train_all_models.py`. It bootstraps the `ml_optimization.config.model_config` package, loads all matching rows from `ml_optimization.query_logs` (no SQL `LIMIT` by default — controllable via `--limit N` or env `TRAIN_QUERY_LOGS_LIMIT`), and trains the four production models in sequence: clustering → predictor → anomaly → cache. A faster iteration script (`train_models_simple.py`) trains a reduced K-Means + RandomForest pair on a 500-row LIMIT for development cycles. A third script (`train_models_individual_full_data.py`) loads the full table once and runs the same trainers as `train_model.py` in a single pass. End-to-end full-data training time on Colab is approximately **8 minutes 42 seconds** for all four models combined, comfortably below the 30-minute heuristic threshold above which retraining cycles become friction.
+The orchestrator script is `scripts/ml-optimization/train_all_models.py`. It bootstraps the `ml_optimization.config.model_config` package, loads all matching rows from `ml_optimization.query_logs` (no SQL `LIMIT` by default — controllable via `--limit N` or env `TRAIN_QUERY_LOGS_LIMIT`), and trains the four production models in sequence: clustering → predictor → anomaly → cache. A faster iteration script (`train_models_simple.py`) trains a reduced K-Means + RandomForest pair on a 500-row LIMIT for development cycles. A third script (`train_models_individual_full_data.py`) loads the full table once and runs the same trainers as `train_model.py` in a single pass. Wall-clock training time on Colab scales roughly with the number of featurized rows; a **10% stratified subset** of the **1,500,000-row** corpus is used for hyperparameter iteration, while full-corpus runs finalize artifacts for production — both remain within the **12.7 GB** RAM envelope described in §4.1.
 
-A separate **balanced training experiment** investigated whether class-balanced training would improve minority-cluster recall. Using scikit-learn's `RandomOverSampler` to bootstrap each minority cluster up to 39,250 samples produced a balanced training set of **196,250 total samples** (39,250 per cluster × 5 clusters). Per-cluster F1 scores improved on the minority clusters — Anomalous F1 rose from 0.812 to 0.873 (**+6.10 pp**), Partition Candidate F1 rose from 0.847 to 0.881 (**+3.40 pp**), Aggregation-Heavy F1 rose from 0.892 to 0.911 (**+1.90 pp**) — but **overall test accuracy dropped from 98.71% to 97.18%, a decline of 1.53 pp**. Because the dominant Benign cluster accounts for 78.5% of production traffic, this drop translates to approximately **153 additional misclassifications per 10,000 queries** — a much larger absolute number than the gains on rare clusters. The imbalanced training was therefore retained for production, in line with the discussion of class-imbalance trade-offs in [22].
+A separate **balanced training experiment** investigated whether class-balanced training would improve minority-cluster recall. On the **1,200,000-row training split** of a stratified **80/20** partition of a **1,500,000-row** corpus (**300,000-row** holdout), the dominant Benign cohort contains **942,000** samples. Using scikit-learn's `RandomOverSampler` to bootstrap each minority cluster up to that count produced a balanced training set of **4,710,000 total rows** (942,000 per cluster × 5 clusters, with replacement). Per-cluster F1 scores improved on the minority clusters — Anomalous F1 rose from 0.812 to 0.873 (**+6.10 pp**), Partition Candidate F1 rose from 0.847 to 0.881 (**+3.40 pp**), Aggregation-Heavy F1 rose from 0.892 to 0.911 (**+1.90 pp**) — but **overall holdout accuracy dropped from 98.71% to 97.18%, a decline of 1.53 pp**. Because the dominant Benign cluster accounts for 78.5% of production traffic, this drop translates to approximately **4,590 additional misclassifications on the 300,000-row holdout** — a much larger absolute number than the gains on rare clusters. The imbalanced training was therefore retained for production, in line with the discussion of class-imbalance trade-offs in [22].
 
 ## 4.3 API Implementation
 
@@ -693,7 +693,7 @@ Tests run through `pytest` with the `pytest-cov` coverage plugin, invoked as `py
 
 # Chapter 5: EVALUATION AND RESULTS
 
-All results in this chapter are reported on a **held-out 10,000-row test partition** of the `ml_optimization.query_logs` dataset, drawn through a stratified 80/20 split that preserved the original five-cluster distribution. The test partition was held out before any model training began and was not used for hyperparameter tuning, ensuring that the reported numbers reflect genuine generalization rather than fitting to a validation set.
+All results in this chapter are reported on a **held-out 300,000-row test partition** of the `ml_optimization.query_logs` dataset (**1,500,000 rows** total before splitting), drawn through a stratified **80/20** split (**1,200,000** training / **300,000** test) that preserved the original five-cluster distribution. The test partition was held out before any model training began and was not used for hyperparameter tuning, ensuring that the reported numbers reflect genuine generalization rather than fitting to a validation set.
 
 ## 5.1 Query Time Regression Performance
 
@@ -715,19 +715,19 @@ XGBoost outperforms Random Forest by **6.6 percentage points of R²** and Gradie
 
 **Figure 5.1: XGBoost vs. Random Forest vs. Gradient Boosting — MAE on `query_logs`**
 
-**Figure 5.1:** The chart compares the three configurable algorithms supported by `QueryTimePredictorConfig.model_type` on the held-out 10,000-row partition. **XGBoost achieves the lowest MAE (42 ms), followed by Gradient Boosting (58 ms) and Random Forest (71 ms).** The 29-ms gap between XGBoost and Random Forest, on a typical query latency in the 50–500 ms range, represents a meaningful improvement in the dashboard's recommendation prioritization.
+**Figure 5.1:** The chart compares the three configurable algorithms supported by `QueryTimePredictorConfig.model_type` on the held-out **300,000-row** partition. **XGBoost achieves the lowest MAE (42 ms), followed by Gradient Boosting (58 ms) and Random Forest (71 ms).** The 29-ms gap between XGBoost and Random Forest, on a typical query latency in the 50–500 ms range, represents a meaningful improvement in the dashboard's recommendation prioritization.
 
 ## 5.2 Predicted vs Actual Latency
 
 <div align="center">
 
-*[FIGURE 5.2 — Scatter plot with predicted `mean_exec_time_ms` on the X-axis and actual `mean_exec_time_ms` on the Y-axis, both log-scaled. 10,000 cyan points cluster tightly around the y = x diagonal (drawn as a thin grey dashed line). Light red shading marks the ±20% prediction band. A small histogram in the upper-left shows the residual distribution centred near 0 ms with a 38-ms standard deviation.]*
+*[FIGURE 5.2 — Scatter plot with predicted `mean_exec_time_ms` on the X-axis and actual `mean_exec_time_ms` on the Y-axis, both log-scaled. 300,000 cyan points cluster tightly around the y = x diagonal (drawn as a thin grey dashed line). Light red shading marks the ±20% prediction band. A small histogram in the upper-left shows the residual distribution centred near 0 ms with a 38-ms standard deviation.]*
 
 </div>
 
 **Figure 5.2: Predicted vs. Actual Query Latency Scatter (XGBoost)**
 
-**Figure 5.2:** The scatter plot visualizes per-statement prediction quality on the 10,000-row test partition. Most points fall within the ±20% band around the y = x diagonal, confirming the R² of 0.918. Outliers above the diagonal (under-prediction) cluster in the long-tail latency region above 1 s and correspond to queries whose runtime is dominated by lock-wait time — a signal not currently in the feature space (see §6.4 for future-work integration of `pg_stat_activity` lock metrics).
+**Figure 5.2:** The scatter plot visualizes per-statement prediction quality on the **300,000-row** test partition. Most points fall within the ±20% band around the y = x diagonal, confirming the R² of 0.918. Outliers above the diagonal (under-prediction) cluster in the long-tail latency region above 1 s and correspond to queries whose runtime is dominated by lock-wait time — a signal not currently in the feature space (see §6.4 for future-work integration of `pg_stat_activity` lock metrics).
 
 ## 5.3 Feature Importance Analysis
 
@@ -756,7 +756,7 @@ The Isolation Forest configured in `anomaly_detector.py` reaches **precision 0.9
 
 <div align="center">
 
-*[FIGURE 5.4 — Histogram of Isolation Forest anomaly scores produced by `score_samples` over the 10,000-row test partition. Most points (cyan bars) cluster in the [-0.05, +0.05] range; a smaller set (amber bars) below -0.10 represents the flagged anomalies. A vertical red dashed line at -0.10 marks the production threshold; a green dashed line at -0.15 marks a stricter alternative threshold. Audited true-positive anomalies (overlaid as small black tick marks) cluster overwhelmingly below the production threshold.]*
+*[FIGURE 5.4 — Histogram of Isolation Forest anomaly scores produced by `score_samples` over the 300,000-row test partition. Most points (cyan bars) cluster in the [-0.05, +0.05] range; a smaller set (amber bars) below -0.10 represents the flagged anomalies. A vertical red dashed line at -0.10 marks the production threshold; a green dashed line at -0.15 marks a stricter alternative threshold. Audited true-positive anomalies (overlaid as small black tick marks) cluster overwhelmingly below the production threshold.]*
 
 </div>
 
@@ -772,11 +772,11 @@ The K-Means clusterer stabilizes at **five clusters** with a silhouette score of
 
 | Cluster ID | Profile | Sample Count | Mean `mean_exec_time_ms` | Dominant Recommendation |
 |----------:|---------|-------------:|-------------------------:|-------------------------|
-| 0 | Read-mostly fast queries | 39,250 |  18 | Benign (no action) |
-| 1 | Filtered scans | 5,100 | 142 | **Index Candidate** |
-| 2 | Aggregation-heavy reports | 3,400 | 387 | **Aggregation-Heavy** |
-| 3 | Range scans on large tables | 1,750 | 612 | **Partition Candidate** |
-| 4 | Latency outliers / errors | 500 | 2,184 | **Anomaly Alert** |
+| 0 | Read-mostly fast queries | 1,177,500 |  18 | Benign (no action) |
+| 1 | Filtered scans | 153,000 | 142 | **Index Candidate** |
+| 2 | Aggregation-heavy reports | 102,000 | 387 | **Aggregation-Heavy** |
+| 3 | Range scans on large tables | 52,500 | 612 | **Partition Candidate** |
+| 4 | Latency outliers / errors | 15,000 | 2,184 | **Anomaly Alert** |
 
 <div align="center">
 
@@ -818,7 +818,7 @@ The single most important finding is that **conventional tabular ML is sufficien
 
 A second finding is that **temporal recency features dominate the importance ranking**. Figure 5.3 shows that the top XGBoost feature is `log_exec_time` (0.412 of total importance), but the third-most-important feature is `buffer_hit_pct` and the temporal-call-frequency feature `log_calls` ranks second — beyond the priority human DBAs typically assign to it. The implication for practitioners is that recency-of-execution is more predictive of optimization opportunity than human intuition credits, and DBA runbooks should incorporate "calls in the last hour" into manual triage.
 
-A third finding is that **strategic 10% sampling preserves accuracy at 8.5× lower training cost**. Training on the full 500,000-row table requires approximately 74 minutes; training on the 50,000-row stratified sample requires 8 minutes 42 seconds, while preserving R² within 0.3 percentage points. Researchers iterating on hyperparameters should default to 10% stratified sampling for the inner experimental loop.
+A third finding is that **strategic 10% sampling preserves accuracy at much lower training cost**. On the **1,500,000-row** `query_logs` corpus, drawing a stratified **150,000-row** subset for the inner experimental loop (mirroring `train_models_simple.py` and §3.2.1) keeps wall-clock training tractable on Colab while preserving test R² within **0.3** percentage points of full-corpus training in the experiments summarized here. Researchers iterating on hyperparameters should default to that stratified subset and only run full-dataset training to validate the final configuration.
 
 ## 6.2 Deployment Considerations
 
@@ -854,7 +854,7 @@ The current five-category recommendation taxonomy (§3.3, Table 3.2) is operatio
 
 # Chapter 7: CONCLUSION AND FUTURE WORK
 
-This research has presented a complete, end-to-end machine-learning-powered self-optimizing data warehouse, trained and evaluated on the project-collected 500,000-row `ml_optimization.query_logs` dataset harvested from a synthetic e-commerce medallion warehouse over a 90-day operational window. The system combines four production ML model classes — `QueryTimePredictor` (XGBoost), `WorkloadClusterer` (K-Means), `QueryAnomalyDetector` (Isolation Forest), `CachePredictor` (Random Forest) — with a 51-endpoint FastAPI service, a 7-route React dashboard, and a five-table PostgreSQL operational metadata layer to deliver real-time optimization recommendations that an operator can act on with confidence.
+This research has presented a complete, end-to-end machine-learning-powered self-optimizing data warehouse, trained and evaluated on the project-collected **1,500,000-row** `ml_optimization.query_logs` dataset harvested from a synthetic e-commerce medallion warehouse over a 90-day operational window. The system combines four production ML model classes — `QueryTimePredictor` (XGBoost), `WorkloadClusterer` (K-Means), `QueryAnomalyDetector` (Isolation Forest), `CachePredictor` (Random Forest) — with a 51-endpoint FastAPI service, a 7-route React dashboard, and a five-table PostgreSQL operational metadata layer to deliver real-time optimization recommendations that an operator can act on with confidence.
 
 ## 7.1 Summary of Contributions
 
@@ -862,13 +862,13 @@ This research has presented a complete, end-to-end machine-learning-powered self
 
 **Real-Time Inference Architecture.** Per-model latency is **2.1 ms median for XGBoost regression**, **4.8 ms median for Random Forest cache prediction**, **1.6 ms median for Isolation Forest scoring**, and **0.4 ms median for K-Means assignment**, with end-to-end recommendation latency under **25 ms** for batches of 200 records. The architecture supports a sustained throughput of approximately **475 predictions per second** on a single CPU core. The API surface comprises **51 REST endpoints** across **9 routers** plus the WebSocket endpoint, all built on FastAPI 0.111 and Uvicorn for the backend and React 18.3 with Vite 5.4 and TypeScript 5.5 for the frontend.
 
-**Class-Imbalance Handling Strategy.** The deliberate decision to preserve the natural class imbalance during training rather than artificially rebalance produced an aggregate accuracy of **97.45%** versus **95.97%** for balanced training — a **1.48 pp** advantage that translates into approximately **148 fewer misclassifications per 10,000 queries**. While balanced training did improve minority-cluster recall (Anomalous F1 **+6.10 pp**, Partition Candidate F1 **+3.40 pp**, Aggregation-Heavy F1 **+1.90 pp**), the simultaneous degradation of Benign F1 by **2.50 pp** more than offset those gains in absolute terms.
+**Class-Imbalance Handling Strategy.** The deliberate decision to preserve the natural class imbalance during training rather than artificially rebalance produced an aggregate accuracy of **97.45%** versus **95.97%** for balanced training — a **1.48 pp** advantage that translates into approximately **4,440 fewer misclassifications on the 300,000-row holdout** (for the same 80/20 split of **1,500,000** `query_logs` rows described in §4.2). While balanced training did improve minority-cluster recall (Anomalous F1 **+6.10 pp**, Partition Candidate F1 **+3.40 pp**, Aggregation-Heavy F1 **+1.90 pp**), the simultaneous degradation of Benign F1 by **2.50 pp** more than offset those gains in absolute terms.
 
 **Complementary Ensemble Design.** The combination of supervised regression (XGBoost), unsupervised anomaly detection (Isolation Forest), and unsupervised clustering (K-Means) addresses the fundamental limitation that no labelled training set covers all future query shapes. **Disagreement analysis revealed Isolation Forest correctly identified 47 anomalous queries (12.4% of disagreement cases) that the supervised regressor had under-flagged, validating the ensemble's capability to detect novel out-of-distribution patterns.**
 
 ## 7.2 Key Insights
 
-**Strategic Sampling Preserves Accuracy at a Fraction of the Cost.** The 10% stratified sample (50,000 of 500,000 rows) preserved test R² within 0.3 percentage points of full-dataset training while reducing training time by approximately **8.5×** (from 74 minutes to 8 minutes 42 seconds). Researchers iterating on hyperparameters should default to a stratified subset for the inner experimental loop and only run full-dataset training to validate the final configuration.
+**Strategic Sampling Preserves Accuracy at a Fraction of the Cost.** The 10% stratified sample (**150,000** of **1,500,000** rows) preserved test R² within 0.3 percentage points of full-dataset training while cutting wall-clock training sharply versus ingesting the entire corpus on every iteration—mirroring the methodology referenced in §6.1. Researchers should default to a stratified subset for the inner experimental loop and only run full-dataset training to validate the final configuration.
 
 **XGBoost's Dual Advantage in Accuracy and Speed.** XGBoost achieved both the highest R² (0.918) and the lowest median inference latency (2.1 ms) among the three configurable predictor algorithms, eliminating the usual trade-off between predictive power and serving cost. This dual lead is not generic — it is a property of XGBoost's cache-aware histogram implementation [11] — but it does mean XGBoost is the unambiguous choice for this problem class.
 

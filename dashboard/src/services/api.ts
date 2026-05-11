@@ -258,7 +258,7 @@ export const api = {
     source?: string;
   }) => {
     try {
-      await request<{ ok: boolean; logged_at: string }>('/system-logs/events', {
+      await request<{ ok: boolean; logged_at: string; event_id?: string; summary?: string }>('/system-logs/events', {
         method: 'POST',
         body: JSON.stringify(payload),
         keepalive: true,
@@ -267,6 +267,15 @@ export const api = {
       // Do not block UI when telemetry logging fails.
     }
   },
+  /** Recent parsed system activity log events (newest first). */
+  getSystemActivityEvents: (limit = 50) =>
+    request<{
+      events: Array<Record<string, unknown>>;
+      returned: number;
+      limit: number;
+      parse_errors_in_tail: number;
+      log_path: string | null;
+    }>(`/system-logs/events?limit=${encodeURIComponent(String(limit))}`),
 
   // Warehouse
   getWarehouseSummary: () => request<{ warehouse_summary: any; database?: string }>('/warehouse/summary'),

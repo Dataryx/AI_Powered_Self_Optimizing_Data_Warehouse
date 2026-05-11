@@ -4,6 +4,13 @@ import { formatLocalDateTime } from '../../utils/time';
 
 interface RecentETLRunsProps { data?: any; loading?: boolean; onRefetch?: () => void }
 
+function runStatusIcon(statusRaw: unknown) {
+  const s = String(statusRaw ?? '').trim().toLowerCase();
+  if (s === 'completed') return <CheckCircle size={14} className="text-[#34d399]" />;
+  if (s === 'failed' || s === 'error') return <XCircle size={14} className="text-[#f87171]" />;
+  return <Clock size={14} className="text-[#fbbf24]" />;
+}
+
 export default function RecentETLRuns({ data, loading, onRefetch }: RecentETLRunsProps) {
   const jobs = Array.isArray(data?.jobs) ? data.jobs.slice(0, 10) : [];
   const hasRuns = jobs.length > 0;
@@ -42,7 +49,7 @@ export default function RecentETLRuns({ data, loading, onRefetch }: RecentETLRun
               className="flex items-center justify-between bg-[#0c0f1a] rounded-xl p-3 border border-[#1e2540]"
             >
               <div className="flex items-center gap-2">
-                {j?.status === 'completed' ? <CheckCircle size={14} className="text-[#34d399]" /> : j?.status === 'failed' ? <XCircle size={14} className="text-[#f87171]" /> : <Clock size={14} className="text-[#fbbf24]" />}
+                {runStatusIcon(j?.status)}
                 <span className="font-mono text-[11px] text-[#c0cde0]">
                   {j?.job_name ?? j?.job_type ?? 'Run'}
                 </span>
@@ -52,7 +59,7 @@ export default function RecentETLRuns({ data, loading, onRefetch }: RecentETLRun
                 <span className="font-mono text-[10px] text-[#5a6a8a]">
                   {j?.completed_at
                     ? formatLocalDateTime(j.completed_at)
-                    : j?.status === 'running'
+                    : String(j?.status ?? '').toLowerCase() === 'running'
                       ? 'In progress'
                       : '—'}
                 </span>

@@ -1,15 +1,14 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, Radio, Settings2, Bell, Gauge, Sliders } from 'lucide-react';
+import { ChevronLeft, Radio, Settings2, Bell, Sliders } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import SidebarPageShell from '../components/SidebarPageShell';
 import MobileMenuButton from '../components/MobileMenuButton';
 import AlertSettings from '../components/settings/AlertSettings';
-import MonitoringSettings from '../components/settings/MonitoringSettings';
 import SystemSettings from '../components/settings/SystemSettings';
 import { formatLocalTime } from '../utils/time';
 
-type SettingsTab = 'alerts' | 'monitoring' | 'system';
+type SettingsTab = 'alerts' | 'system';
 
 const TABS: {
   id: SettingsTab;
@@ -22,12 +21,6 @@ const TABS: {
     label: 'Alert rules',
     hint: 'Server-side thresholds',
     icon: Bell,
-  },
-  {
-    id: 'monitoring',
-    label: 'Monitoring',
-    hint: 'Refresh & polling',
-    icon: Gauge,
   },
   {
     id: 'system',
@@ -96,11 +89,10 @@ export default function SettingsPage() {
             <div className="w-8 h-8 rounded-lg bg-[#3ecfff12] border border-[#3ecfff25] flex items-center justify-center shrink-0">
               <Settings2 size={16} className="text-[#3ecfff]" aria-hidden />
             </div>
-            <h1 className="font-body text-2xl sm:text-3xl font-bold text-[#e0e8f5] tracking-tight">Monitoring system settings</h1>
+            <h1 className="font-body text-2xl sm:text-3xl font-bold text-[#e0e8f5] tracking-tight">Settings</h1>
           </div>
           <p className="font-body text-sm text-[#5a6a8a] ml-0 sm:ml-10 mt-1 sm:mt-0 max-w-2xl">
-            Tune alert rules on the API, browser-side refresh intervals, and local preferences. Matches the ETL Monitoring
-            layout for a consistent ops experience.
+            Tune alert rules on the API and local preferences.
           </p>
         </motion.div>
 
@@ -152,7 +144,6 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             {tab === 'alerts' ? <AlertSettings /> : null}
-            {tab === 'monitoring' ? <MonitoringSettings /> : null}
             {tab === 'system' ? <SystemSettings /> : null}
           </motion.div>
         </AnimatePresence>

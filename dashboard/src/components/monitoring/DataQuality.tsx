@@ -5,8 +5,6 @@ import {
   AlertCircle,
   CheckCircle,
   X,
-  ChevronDown,
-  ChevronRight,
   ShieldCheck,
   Layers,
   AlertTriangle,
@@ -33,7 +31,56 @@ type TableMetric = {
   quality_score?: number;
   status?: string;
   factors?: string[];
+  reason_lines?: string[];
 };
+
+function pickQualityMetrics(dq: Record<string, unknown> | undefined): Record<string, { tables?: TableMetric[] }> {
+  if (!dq || typeof dq !== 'object') return {};
+  const qm = dq.quality_metrics ?? (dq as { qualityMetrics?: unknown }).qualityMetrics;
+  if (qm && typeof qm === 'object' && !Array.isArray(qm)) return qm as Record<string, { tables?: TableMetric[] }>;
+  return {};
+}
+
+/**
+ * One line per table row, driven only by that row’s score % and counts (tiers match the API: 95 / 80 / 60).
+ */
+function percentBasedReasonForTable(schema: string, t: TableMetric): string {
+  const name = t.table ?? 'unknown';
+  const scoreRaw = Number(t.quality_score ?? NaN);
+  const rows = Number(t.row_count ?? 0);
+  const dead = Number(t.dead_rows ?? 0);
+  const band = String(t.status ?? '').trim();
+
+  if (!Number.isFinite(scoreRaw)) {
+    return `${schema}.${name}: no score returned for this table.`;
+  }
+
+  const pct = scoreRaw.toFixed(1);
+
+  let why: string;
+  if (scoreRaw >= 95) {
+    why =
+      'This percentage sits in the top tier (≥95%): storage signal and recent ETL outcomes combine well for this table.';
+  } else if (scoreRaw >= 80) {
+    why =
+      'This percentage is in the healthy band (≥80%) for this table—still watch dead tuples and job failures over time.';
+  } else if (scoreRaw >= 60) {
+    why =
+      'This percentage is mid-range (60–79%) for this table—often driven by dead tuples, failed runs, or older loads.';
+  } else {
+    why =
+      'This percentage is below 60% for this table—common drivers are an empty relation, weak pg_stat signal, failures, or stale ETL.';
+  }
+
+  const counts =
+    rows <= 0
+      ? 'Row count is 0.'
+      : dead > 0
+        ? `${rows.toLocaleString()} rows; ${dead.toLocaleString()} dead tuples in pg_stat for this relation.`
+        : `${rows.toLocaleString()} rows; pg_stat shows no dead tuples for this relation.`;
+
+  return `${schema}.${name} scores ${pct}% (${band || '—'}). ${why} ${counts}`;
+}
 
 function resolveSchema(layer: LayerRow): string | undefined {
   if (layer.schema) return layer.schema;
@@ -51,11 +98,10 @@ function scoreHue(score: number): { bar: string; text: string } {
 }
 
 export default function DataQuality({ data, loading, onRefetch }: DataQualityProps) {
-  const dq = data?.dataQuality;
+  const dq = data?.dataQuality as Record<string, unknown> | undefined;
   const apiLayers = Array.isArray(dq?.layers) ? (dq.layers as LayerRow[]) : [];
-  const qualityMetrics = dq?.quality_metrics ?? {};
+  const qualityMetrics = pickQualityMetrics(dq);
   const [openLayer, setOpenLayer] = useState<LayerRow | null>(null);
-  const [expandedTable, setExpandedTable] = useState<string | null>(null);
 
   const modalTables = useMemo(() => {
     const sch = openLayer ? resolveSchema(openLayer) : undefined;
@@ -179,10 +225,7 @@ export default function DataQuality({ data, loading, onRefetch }: DataQualityPro
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.06 + 0.15 }}
-                onClick={() => {
-                  setOpenLayer(layer);
-                  setExpandedTable(null);
-                }}
+                onClick={() => setOpenLayer(layer)}
                 className="relative text-left rounded-xl border bg-[#0c0f1a] p-4 cursor-pointer transition-all hover:border-[#2a3a60] group overflow-hidden"
                 style={{ borderColor: warn ? 'rgba(248, 113, 113, 0.35)' : '#1e2540' }}
               >
@@ -297,10 +340,10 @@ export default function DataQuality({ data, loading, onRefetch }: DataQualityPro
                       </>
                     )}
                   </p>
-                  <p className="font-mono text-[9px] text-[#4a5a7a] mt-2 leading-relaxed max-w-xl">
+                  {/* <p className="font-mono text-[9px] text-[#4a5a7a] mt-2 leading-relaxed max-w-xl">
                     Scores use real row counts, pg_stat_user_tables dead/live tuples, and monitoring.job_runs (7d)
                     success rates, blended 55% / 45% with penalties for failures and stale jobs.
-                  </p>
+                  </p> */}
                 </div>
                 <button
                   type="button"
@@ -321,26 +364,16 @@ export default function DataQuality({ data, loading, onRefetch }: DataQualityPro
                 {modalTables.map((t) => {
                   const sch = resolveSchema(openLayer);
                   const key = `${sch ?? '?'}.${t.table}`;
-                  const isOpen = expandedTable === key;
                   const score = Number(t.quality_score ?? 0);
-                  const factors = Array.isArray(t.factors) ? t.factors : [];
+                  const reasonOneLine = percentBasedReasonForTable(sch ?? 'unknown', t);
                   const chip = scoreHue(score);
                   return (
                     <div
                       key={key}
                       className="rounded-xl border border-[#1e2540] bg-[#111628]/80 overflow-hidden hover:border-[#252b45] transition-colors"
                     >
-                      <button
-                        type="button"
-                        onClick={() => setExpandedTable(isOpen ? null : key)}
-                        className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-[#0c0f1a]/60 transition-colors"
-                      >
+                      <div className="flex items-center justify-between gap-2 px-4 py-3">
                         <div className="flex items-center gap-2 min-w-0">
-                          {isOpen ? (
-                            <ChevronDown size={14} className="text-[#5a6a8a] shrink-0" />
-                          ) : (
-                            <ChevronRight size={14} className="text-[#5a6a8a] shrink-0" />
-                          )}
                           <span className="font-mono text-sm font-semibold text-[#c0cde0] truncate">
                             {t.table}
                           </span>
@@ -366,35 +399,23 @@ export default function DataQuality({ data, loading, onRefetch }: DataQualityPro
                             {score.toFixed(1)}%
                           </span>
                         </div>
-                      </button>
-                      <div className="px-4 pb-3 pt-0 grid grid-cols-2 gap-2 font-mono text-[10px] text-[#7a8aaa]">
+                      </div>
+                      <div className="px-4 pb-2 grid grid-cols-2 gap-2 font-mono text-[10px] text-[#7a8aaa]">
                         <div>Rows: {(t.row_count ?? 0).toLocaleString()}</div>
                         <div>Dead tuples (stat): {(t.dead_rows ?? 0).toLocaleString()}</div>
                       </div>
-                      {isOpen && (
-                        <div className="px-4 pb-4 border-t border-[#1e2540] pt-3 bg-[#0c0f1a]/30">
-                          <span className="font-mono text-[9px] text-[#4a5a7a] uppercase tracking-wider block mb-2">
-                            Reason behind the score
-                          </span>
-                          {factors.length === 0 ? (
-                            <p className="font-body text-xs text-[#5a6a8a]">
-                              No score reasons returned from the API (update the backend).
-                            </p>
-                          ) : (
-                            <ul className="space-y-2">
-                              {factors.map((f, idx) => (
-                                <li
-                                  key={idx}
-                                  className="font-body text-xs text-[#a0b0c8] leading-relaxed pl-3 border-l-2"
-                                  style={{ borderColor: `${openLayer.color ?? '#3ecfff'}55` }}
-                                >
-                                  {f}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      )}
+                      <div className="px-4 pb-4 border-t border-[#1e2540] pt-3 bg-[#0c0f1a]/30">
+                        <span className="font-mono text-[9px] text-[#4a5a7a] uppercase tracking-wider block mb-2">
+                          Reason behind the score
+                        </span>
+                        <p
+                          className="font-body text-xs text-[#a0b0c8] leading-relaxed pl-3 border-l-2 m-0"
+                          style={{ borderColor: `${openLayer.color ?? '#3ecfff'}55` }}
+                          title={reasonOneLine}
+                        >
+                          {reasonOneLine}
+                        </p>
+                      </div>
                     </div>
                   );
                 })}

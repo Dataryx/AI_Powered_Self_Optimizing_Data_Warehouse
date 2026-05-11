@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Sparkles, RefreshCw, TrendingUp, TrendingDown, Eye, X } from 'lucide-react';
 import type { AnalyticsPageData } from '../../hooks/useAnalyticsData';
 import type { QueryPerfRow } from '../../utils/analyticsDerived';
+import { avgLatencySeconds } from '../../utils/analyticsDerived';
 
 interface MLHotspotTimelineProps {
   data?: AnalyticsPageData;
@@ -20,6 +21,9 @@ type HotspotRow = {
   impactScore: number;
   sampleLogId: number | null;
   queryTextPreview: string;
+  avgMs1d: number | null;
+  avgMs7d: number | null;
+  avgMsLong: number | null;
 };
 
 function n(v: unknown): number {
@@ -32,22 +36,82 @@ function queryKey(q: QueryPerfRow): string | null {
   return id || null;
 }
 
-function fmtSecs(s: number): string {
-  if (!Number.isFinite(s)) return '—';
-  if (s < 1) {
-    const ms = s * 1000;
-    if (ms < 0.1) return `${ms.toFixed(4)} ms`;
-    if (ms < 1) return `${ms.toFixed(3)} ms`;
-    if (ms < 10) return `${ms.toFixed(2)} ms`;
-    return `${ms.toFixed(1)} ms`;
+/** Seconds per call — same rules as Query Performance / analytics panels. */
+function avgSeconds(q: QueryPerfRow): number {
+  return avgLatencySeconds(q);
+}
+
+/** Prefer 1d ranking, then 7d, then long window — matches backend union refill ordering. */
+function orderedUnionIds(...groups: QueryPerfRow[][]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const rows of groups) {
+    for (const r of rows) {
+      const id = queryKey(r);
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        out.push(id);
+      }
+    }
   }
-  return `${s.toFixed(2)} s`;
+  return out;
+}
+
+/** Latency for one window; ``undefined`` row ⇒ NaN (do not substitute another window). */
+function avgSecondsOptional(row: QueryPerfRow | undefined): number {
+  if (!row) return NaN;
+  const v = avgSeconds(row);
+  return Number.isFinite(v) ? v : NaN;
+}
+
+function computeTrendPctMs(ms1d: number | null, ms7d: number | null, msLong: number | null): number {
+  /**
+   * Recent vs long-term norm: baseline prefers **long** window (matches “hotspot” intuition).
+   * Falls back to 7d when long is missing so Trend ≠ parroting the 7d latency column.
+   */
+  const baseline =
+    msLong != null && msLong > 0 ? msLong : ms7d != null && ms7d > 0 ? ms7d : NaN;
+  const recent = ms1d != null && ms1d >= 0 ? ms1d : NaN;
+  if (!Number.isFinite(baseline) || baseline <= 0) {
+    return Number.isFinite(recent) && recent > 0 ? 100 : 0;
+  }
+  if (!Number.isFinite(recent)) return 0;
+  return ((recent - baseline) / baseline) * 100;
 }
 
 function fmtDelta(p: number): string {
   if (!Number.isFinite(p)) return '—';
   const sign = p >= 0 ? '+' : '';
-  return `${sign}${p.toFixed(1)}%`;
+  const a = Math.abs(p);
+  const d = a > 0 && a < 1 ? 2 : a < 10 ? 2 : 1;
+  return `${sign}${p.toFixed(d)}%`;
+}
+
+/** Table/medium cells: prefer ms precision so Long / 7d / 1d rarely look identical by rounding. */
+function fmtLatencyCell(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return '—';
+  if (ms >= 1000) return `${(ms / 1000).toFixed(3)} s`;
+  return `${ms.toFixed(2)} ms`;
+}
+
+function execCount(row: QueryPerfRow | undefined): number | null {
+  if (!row) return null;
+  const v = row.execution_count;
+  const x = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(x) ? Math.max(0, Math.floor(x)) : null;
+}
+
+/** Average latency in ms as returned or implied by Σ ms / Σ calls. */
+function avgMsFromRow(row: QueryPerfRow | undefined): number | null {
+  if (!row) return null;
+  const ms = row.avg_execution_time_ms;
+  if (ms != null && Number.isFinite(Number(ms))) return Number(ms);
+  const ec = execCount(row);
+  const tms = row.total_execution_time_ms;
+  if (ec != null && ec > 0 && tms != null && Number.isFinite(Number(tms))) {
+    return Number(tms) / ec;
+  }
+  return null;
 }
 
 export default function MLHotspotTimeline({ data, loading, onRefresh }: MLHotspotTimelineProps) {
@@ -57,8 +121,14 @@ export default function MLHotspotTimeline({ data, loading, onRefresh }: MLHotspo
   const q30 = (data?.queryPerformance ?? []) as QueryPerfRow[];
 
   const hotspots = useMemo(() => {
+    const m1 = new Map<string, QueryPerfRow>();
     const m7 = new Map<string, QueryPerfRow>();
     const m30 = new Map<string, QueryPerfRow>();
+    for (const r of q1) {
+      const id = queryKey(r);
+      if (!id) continue;
+      m1.set(id, r);
+    }
     for (const r of q7) {
       const id = queryKey(r);
       if (!id) continue;
@@ -70,26 +140,34 @@ export default function MLHotspotTimeline({ data, loading, onRefresh }: MLHotspo
       m30.set(id, r);
     }
 
-    // Strictly real timeline rows: require the query to exist in 1d, 7d, and 30d windows.
-    const seed = q1;
-    const rows: HotspotRow[] = [];
-    const seen = new Set<string>();
+    const idOrder = orderedUnionIds(q1, q7, q30);
 
-    for (const r of seed) {
-      const id = queryKey(r);
-      if (!id) continue;
-      if (seen.has(id)) continue;
-      seen.add(id);
+    const rows: HotspotRow[] = [];
+
+    for (const id of idOrder) {
+      const r1 = m1.get(id);
       const r7 = m7.get(id);
       const r30 = m30.get(id);
-      if (!r7 || !r30) continue;
-      const avg1d = n(r.avg_execution_time);
-      const avg7d = n(r7.avg_execution_time);
-      const avg30d = n(r30.avg_execution_time);
-      const baseline = avg7d > 0 ? avg7d : avg30d;
-      const growthPct = baseline > 0 ? ((avg1d - baseline) / baseline) * 100 : avg1d > 0 ? 100 : 0;
-      const runs = Math.max(0, Math.floor(n(r.execution_count)));
-      const impactScore = Math.max(0, avg1d * Math.max(1, runs)) * (1 + Math.max(0, growthPct) / 100);
+      if (!r1 && !r7 && !r30) continue;
+
+      const ms1 = avgMsFromRow(r1);
+      const ms7 = avgMsFromRow(r7);
+      const msL = avgMsFromRow(r30);
+      const avg1d = ms1 != null ? ms1 / 1000 : avgSecondsOptional(r1);
+      const avg7d = ms7 != null ? ms7 / 1000 : avgSecondsOptional(r7);
+      const avg30d = msL != null ? msL / 1000 : avgSecondsOptional(r30);
+      const growthPct = computeTrendPctMs(ms1, ms7, msL);
+      const src = r1 ?? r7 ?? r30!;
+      const runs = Math.max(0, Math.floor(n(src.execution_count)));
+      const latencyForImpact = Number.isFinite(avg1d)
+        ? avg1d
+        : Number.isFinite(avg7d)
+          ? avg7d
+          : Number.isFinite(avg30d)
+            ? avg30d
+            : 0;
+      const impactScore =
+        Math.max(0, latencyForImpact * Math.max(1, runs)) * (1 + Math.max(0, growthPct) / 100);
       rows.push({
         queryId: id,
         runs,
@@ -98,10 +176,11 @@ export default function MLHotspotTimeline({ data, loading, onRefresh }: MLHotspo
         avg30d,
         growthPct,
         impactScore,
-        sampleLogId: Number.isFinite(n(r.sample_log_id))
-          ? Math.floor(n(r.sample_log_id))
-          : null,
-        queryTextPreview: String(r.query_text_preview ?? ''),
+        sampleLogId: Number.isFinite(n(src.sample_log_id)) ? Math.floor(n(src.sample_log_id)) : null,
+        queryTextPreview: String(r1?.query_text_preview ?? r7?.query_text_preview ?? r30?.query_text_preview ?? ''),
+        avgMs1d: ms1,
+        avgMs7d: ms7,
+        avgMsLong: msL,
       });
     }
 
@@ -124,9 +203,6 @@ export default function MLHotspotTimeline({ data, loading, onRefresh }: MLHotspo
           </div>
           <div className="min-w-0">
             <h2 className="font-body text-base font-bold text-ink">ML Hotspot Timeline</h2>
-            {/* <p className="font-body text-[10px] text-ink-faint mt-0.5">
-              Top 13 rising hotspots by latest latency and trend (30d → 7d → 1d).
-            </p> */}
           </div>
         </div>
         <button
@@ -145,7 +221,7 @@ export default function MLHotspotTimeline({ data, loading, onRefresh }: MLHotspo
           <div className="py-12 text-center text-xs text-ink-faint">Loading hotspots…</div>
         ) : hotspots.length === 0 ? (
           <div className="py-12 text-center text-xs text-ink-faint">
-            No real hotspot timeline data available (requires distinct 1d, 7d, and 30d query windows).
+            No query performance samples in the selected windows yet. Collect query_logs and refresh the analytics bundle.
           </div>
         ) : (
           <div className="rounded-xl border border-contour overflow-hidden">
@@ -155,10 +231,14 @@ export default function MLHotspotTimeline({ data, loading, onRefresh }: MLHotspo
                   <tr>
                     <th className="px-2 py-2 font-medium">#</th>
                     <th className="px-2 py-2 font-medium">Runs</th>
-                    <th className="px-2 py-2 font-medium">30d</th>
+                    <th className="px-2 py-2 font-medium" title="Long window (data retention days)">
+                      Long
+                    </th>
                     <th className="px-2 py-2 font-medium">7d</th>
                     <th className="px-2 py-2 font-medium">1d</th>
-                    <th className="px-2 py-2 font-medium">Trend</th>
+                    <th className="px-2 py-2 font-medium" title="Trend: (1d avg − long avg) / long avg · falls back to 7d baseline if long missing">
+                      Trend
+                    </th>
                     <th className="px-2 py-2 font-medium text-right">View</th>
                   </tr>
                 </thead>
@@ -167,9 +247,9 @@ export default function MLHotspotTimeline({ data, loading, onRefresh }: MLHotspo
                     <tr key={`${r.queryId}-${i}`} className="border-t border-contour/50 hover:bg-base/40">
                       <td className="px-2 py-1.5 text-ink-faint tabular-nums">{i + 1}</td>
                       <td className="px-2 py-1.5 text-ink tabular-nums">{r.runs.toLocaleString()}</td>
-                      <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtSecs(r.avg30d)}</td>
-                      <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtSecs(r.avg7d)}</td>
-                      <td className="px-2 py-1.5 text-ink tabular-nums font-semibold">{fmtSecs(r.avg1d)}</td>
+                      <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtLatencyCell(r.avgMsLong)}</td>
+                      <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtLatencyCell(r.avgMs7d)}</td>
+                      <td className="px-2 py-1.5 text-ink tabular-nums font-semibold">{fmtLatencyCell(r.avgMs1d)}</td>
                       <td className="px-2 py-1.5">
                         <span
                           className={`inline-flex items-center gap-1 font-mono tabular-nums ${
@@ -230,22 +310,22 @@ export default function MLHotspotTimeline({ data, loading, onRefresh }: MLHotspo
                   <p className="text-sm font-semibold text-ink tabular-nums">{activeRow.runs.toLocaleString()}</p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
-                  <p className="text-[10px] text-ink-faint">Trend</p>
+                  <p className="text-[10px] text-ink-faint">Trend (1d vs long)</p>
                   <p className={`text-sm font-semibold tabular-nums ${activeRow.growthPct >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
                     {fmtDelta(activeRow.growthPct)}
                   </p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
-                  <p className="text-[10px] text-ink-faint">30d avg</p>
-                  <p className="text-sm font-semibold text-ink tabular-nums">{fmtSecs(activeRow.avg30d)}</p>
+                  <p className="text-[10px] text-ink-faint">Long avg</p>
+                  <p className="text-sm font-semibold text-ink tabular-nums">{fmtLatencyCell(activeRow.avgMsLong)}</p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
                   <p className="text-[10px] text-ink-faint">7d avg</p>
-                  <p className="text-sm font-semibold text-ink tabular-nums">{fmtSecs(activeRow.avg7d)}</p>
+                  <p className="text-sm font-semibold text-ink tabular-nums">{fmtLatencyCell(activeRow.avgMs7d)}</p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
                   <p className="text-[10px] text-ink-faint">1d avg</p>
-                  <p className="text-sm font-semibold text-ink tabular-nums">{fmtSecs(activeRow.avg1d)}</p>
+                  <p className="text-sm font-semibold text-ink tabular-nums">{fmtLatencyCell(activeRow.avgMs1d)}</p>
                 </div>
               </div>
               <div className="rounded-xl border border-contour bg-base/30 p-3">

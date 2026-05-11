@@ -15,10 +15,36 @@ type MonitoringSlice = {
   errors?: any[];
   dataQuality?: any;
   throughput?: any;
+  /** From monitoring bundle: COUNT(*) failed/error job_runs (all time). */
+  failedRunsTotal?: number;
+  /** From GET /alerts/anomalies (`total`); matches Alerts ML/heuristic anomaly list. */
+  mlAnomalyCount?: number;
 };
 
 function isApiNotFound(e: unknown): boolean {
   return /\b404\b|Not Found/i.test(e instanceof Error ? e.message : String(e));
+}
+
+/** Parse GET /alerts/anomalies payload for display on ETL Monitoring stats row. */
+function parseAnomaliesTotal(raw: unknown): number | undefined {
+  if (raw == null || typeof raw !== 'object') return undefined;
+  const o = raw as Record<string, unknown>;
+  const t = o.total;
+  if (typeof t === 'number' && Number.isFinite(t)) return Math.max(0, Math.floor(t));
+  const arr = o.anomalies;
+  if (Array.isArray(arr)) return Math.max(0, arr.length);
+  return undefined;
+}
+
+/** Σ failed/error job_runs from monitoring bundle — never infer from errors[] (diagnostics mixed in). */
+function pickFailedRunsTotal(payload: unknown): number | undefined {
+  if (payload == null || typeof payload !== 'object') return undefined;
+  const o = payload as Record<string, unknown>;
+  const raw = o.failedRunsTotal ?? o.failed_runs_total;
+  if (raw === '' || raw == null) return undefined;
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(0, Math.floor(n));
 }
 
 export function useMonitoringData() {
@@ -62,15 +88,35 @@ export function useMonitoringData() {
         api.getDataFreshness(bust).then((v) => merge({ freshness: v })).catch(() => {}),
         api
           .getETLErrors()
-          .then((v) => merge({ errors: Array.isArray(v) ? v : v?.errors ?? [] }))
+          .then((v) => {
+            const payload = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+            const errs = Array.isArray(v) ? v : (payload.errors as unknown[] | undefined) ?? [];
+            const fr = pickFailedRunsTotal(payload);
+            merge({
+              errors: errs as any[],
+              ...(fr !== undefined ? { failedRunsTotal: fr } : {}),
+            });
+          })
           .catch(() => merge({ errors: [] })),
         api.getDataQualityMetrics(bust).then((v) => merge({ dataQuality: v })).catch(() => {}),
         api.getThroughputMetrics().then((v) => merge({ throughput: v })).catch(() => {}),
       ]);
 
     try {
-      try {
-        const page = await api.getETLMonitoringPage(bust);
+      const [pageResult, anomaliesResult] = await Promise.allSettled([
+        api.getETLMonitoringPage(bust),
+        api.getAnomalies(),
+      ]);
+
+      if (anomaliesResult.status === 'fulfilled') {
+        const n = parseAnomaliesTotal(anomaliesResult.value);
+        merge({ mlAnomalyCount: n });
+      } else {
+        merge({ mlAnomalyCount: undefined });
+      }
+
+      if (pageResult.status === 'fulfilled') {
+        const page = pageResult.value;
         merge({
           jobs: (page.jobs ?? []) as any[],
           jobDefinitions: (page.jobDefinitions ?? []) as any[],
@@ -79,14 +125,14 @@ export function useMonitoringData() {
           throughput: page.throughput ?? undefined,
           freshness: page.freshness,
           dataQuality: page.dataQuality,
+          failedRunsTotal: pickFailedRunsTotal(page as Record<string, unknown>),
         });
         if (!options?.silent) {
           setLoading(false);
         }
-      } catch (e) {
-        if (!isApiNotFound(e)) {
-          throw e;
-        }
+      } else if (!isApiNotFound(pageResult.reason)) {
+        throw pageResult.reason instanceof Error ? pageResult.reason : new Error(String(pageResult.reason));
+      } else {
         try {
           const bundle = await api.getETLMonitoringDashboardBundle(bust);
           merge({
@@ -95,6 +141,7 @@ export function useMonitoringData() {
             pipeline: bundle.pipeline,
             errors: (bundle.errors ?? []) as any[],
             throughput: bundle.throughput ?? undefined,
+            failedRunsTotal: pickFailedRunsTotal(bundle as Record<string, unknown>),
           });
           if (!options?.silent) {
             setLoading(false);

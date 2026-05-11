@@ -21,13 +21,6 @@ function fmtMs(n: number | undefined): string {
   return `${n.toFixed(0)} ms`;
 }
 
-function fmtTs(ts: string | null | undefined): string {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleString();
-}
-
 function formatGroupLabel(rawId: string): string {
   const n = Number(rawId);
   if (Number.isFinite(n)) return String(n + 1);
@@ -68,7 +61,6 @@ export default function WorkloadCacheMlPanels({
     return pairs.reduce((best, cur) => (Number(cur[1]) > Number(best[1]) ? cur : best));
   }, [counts]);
   const topClusterShare = largestClusterEntry ? pct(Number(largestClusterEntry[1]), totalQ) : '0';
-  const workloadMeta = workload?.metadata;
 
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [groupPage, setGroupPage] = useState(1);
@@ -161,21 +153,6 @@ export default function WorkloadCacheMlPanels({
               {workload.algorithm}
             </span>
           ) : null}
-          {totalQ > 0 ? (
-            <span className="px-2 py-0.5 rounded-md font-mono text-[10px] text-ink-faint tabular-nums">
-              Sample size: {totalQ.toLocaleString()}
-            </span>
-          ) : null}
-          {workloadMeta?.sample_limit != null ? (
-            <span className="px-2 py-0.5 rounded-md font-mono text-[10px] text-ink-faint tabular-nums">
-              Input cap: {workloadMeta.sample_limit.toLocaleString()}
-            </span>
-          ) : null}
-          {workloadMeta?.data_watermark_utc ? (
-            <span className="px-2 py-0.5 rounded-md font-mono text-[10px] text-ink-faint tabular-nums">
-              Watermark: {fmtTs(workloadMeta.data_watermark_utc)}
-            </span>
-          ) : null}
         </div>
 
         <div className="p-5">
@@ -201,11 +178,7 @@ export default function WorkloadCacheMlPanels({
 
           {workload?.model_loaded && clusterEntries.length > 0 ? (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
-                  <p className="text-[10px] text-ink-faint">Queries analyzed</p>
-                  <p className="text-sm font-semibold text-ink tabular-nums">{totalQ.toLocaleString()}</p>
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
                   <p className="text-[10px] text-ink-faint">Groups found</p>
                   <p className="text-sm font-semibold text-ink tabular-nums">{clusterEntries.length}</p>

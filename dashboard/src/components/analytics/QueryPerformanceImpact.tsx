@@ -6,6 +6,9 @@ import {
   deriveQueryAggregates,
   topQueriesByTotalTime,
   weightedMeanCacheHitRate,
+  totalExecutionTimeMs,
+  avgLatencySeconds,
+  percentileLatencySeconds,
   type QueryPerfRow,
 } from '../../utils/analyticsDerived';
 
@@ -31,7 +34,11 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
   const q = (data?.queryPerformance7d ?? []) as QueryPerfRow[];
   const agg = useMemo(() => deriveQueryAggregates(q), [q]);
   const top = useMemo(() => topQueriesByTotalTime(q, 8), [q]);
-  const topTotal = Math.max(0.001, top.reduce((sum, r) => sum + Math.max(0, r.total_execution_time ?? 0), 0));
+  /** Sum of wall time for the rows shown in the table — denominator for comparable impact bars. */
+  const topSumMs = useMemo(
+    () => top.reduce((sum, r) => sum + totalExecutionTimeMs(r), 0),
+    [top],
+  );
   const wCache = useMemo(() => weightedMeanCacheHitRate(q), [q]);
   const slowSharePct = agg.totalExecutions > 0 ? agg.slowExecutionShare * 100 : 0;
   const [activeRow, setActiveRow] = useState<QueryPerfRow | null>(null);
@@ -129,33 +136,50 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                     >
                       Worst (P95)
                     </th>
-                    <th className="px-2 py-2 font-medium">Impact %</th>
+                    <th
+                      className="px-2 py-2 font-medium"
+                      title="Share of total time among these top queries only (bar + % sum to 100% across the listed rows)."
+                    >
+                      Impact %
+                    </th>
                     <th className="px-2 py-2 font-medium text-right">View</th>
                   </tr>
                 </thead>
                 <tbody>
                   {top.map((row, i) => {
-                    const total = Math.max(0, row.total_execution_time ?? 0);
-                    const pct = (total / topTotal) * 100;
+                    const totalMs = totalExecutionTimeMs(row);
+                    const pctOfTop = topSumMs > 0 ? Math.min(100, (totalMs / topSumMs) * 100) : 0;
                     return (
                       <tr key={String(row.query_id ?? i)} className="border-t border-contour/50 align-top hover:bg-base/50">
                         <td className="px-2 py-1.5 text-ink-faint tabular-nums">{i + 1}</td>
                         <td className="px-2 py-1.5 text-ink-muted tabular-nums">
                           {(row.execution_count ?? 0).toLocaleString()}
                         </td>
-                        <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtSecs(row.avg_execution_time)}</td>
-                        <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtSecs(row.p95_execution_time)}</td>
+                        <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtSecs(avgLatencySeconds(row))}</td>
+                        <td className="px-2 py-1.5 text-ink-muted tabular-nums">{fmtSecs(percentileLatencySeconds(row, 'p95'))}</td>
                         <td className="px-2 py-1.5">
-                          <div className="flex items-center gap-2">
-                            <div className="w-24 h-2 rounded-md bg-base overflow-hidden border border-contour/80" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Relative time share">
+                          <div
+                            className="flex items-center gap-2"
+                            title={`${pctOfTop.toFixed(1)}% of time among these top queries (${q.length} query types in the 7d response)`}
+                          >
+                            <div
+                              className="w-24 h-2 rounded-md bg-base overflow-hidden border border-contour/80 shrink-0"
+                              role="progressbar"
+                              aria-valuenow={Math.round(pctOfTop)}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              aria-label="Share of time among listed top queries"
+                            >
                               <motion.div
                                 initial={{ width: 0 }}
-                                animate={{ width: `${pct}%` }}
+                                animate={{ width: `${pctOfTop}%` }}
                                 transition={{ duration: 0.35, delay: i * 0.03 }}
                                 className="h-full bg-gradient-to-r from-topo-6 to-cyan-600/80"
                               />
                             </div>
-                            <span className="text-[10px] text-ink-muted tabular-nums w-10 text-right">{pct.toFixed(0)}%</span>
+                            <span className="text-[10px] text-ink tabular-nums font-medium min-w-[3rem] text-right shrink-0">
+                              {pctOfTop.toFixed(1)}%
+                            </span>
                           </div>
                         </td>
                         <td className="px-2 py-1.5 text-right">
@@ -217,7 +241,7 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                     Typical (avg / run)
                   </p>
                   <p className="text-sm font-semibold text-ink tabular-nums">
-                    {fmtSecs(activeRow.avg_execution_time)}
+                    {fmtSecs(avgLatencySeconds(activeRow))}
                   </p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
@@ -225,7 +249,7 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                     Median (P50)
                   </p>
                   <p className="text-sm font-semibold text-ink tabular-nums">
-                    {fmtSecs(activeRow.p50_execution_time)}
+                    {fmtSecs(percentileLatencySeconds(activeRow, 'p50'))}
                   </p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
@@ -233,7 +257,7 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                     Worst (P95)
                   </p>
                   <p className="text-sm font-semibold text-ink tabular-nums">
-                    {fmtSecs(activeRow.p95_execution_time)}
+                    {fmtSecs(percentileLatencySeconds(activeRow, 'p95'))}
                   </p>
                 </div>
                 <div className="rounded-lg border border-contour bg-base/40 px-3 py-2">
@@ -241,7 +265,7 @@ export default function QueryPerformanceImpact({ data, loading, onRefresh }: Que
                     Total time
                   </p>
                   <p className="text-sm font-semibold text-ink tabular-nums">
-                    {fmtSecs(activeRow.total_execution_time)}
+                    {fmtSecs(totalExecutionTimeMs(activeRow) / 1000)}
                   </p>
                 </div>
               </div>

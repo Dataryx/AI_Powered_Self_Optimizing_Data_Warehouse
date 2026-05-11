@@ -449,6 +449,7 @@ def _sync_compute_freshness_dict() -> dict:
         # First, get ETL job completion times for each table from job_runs (primary source of truth)
         etl_completion_times = {}
         etl_records_processed = {}
+        pipeline_completed_at = None
         try:
             cursor.execute("""
                 SELECT 
@@ -472,6 +473,29 @@ def _sync_compute_freshness_dict() -> dict:
             logger.info(f"Found {len(etl_completion_times)} tables with ETL job data")
         except Exception as etl_error:
             logger.warning(f"Could not fetch ETL completion times: {etl_error}", exc_info=True)
+
+        # Full "Complete ETL Pipeline" runs store layer/table_name as NULL — still real DB activity.
+        # Use latest pipeline completion as an ETL clock candidate for silver/gold tables (merged with MAX(timestamps)).
+        try:
+            cursor.execute(
+                """
+                SELECT MAX(jr.completed_at) AS ts
+                FROM monitoring.job_runs jr
+                INNER JOIN monitoring.etl_jobs j ON jr.job_id = j.job_id
+                WHERE jr.status = 'completed'
+                  AND jr.completed_at IS NOT NULL
+                  AND (
+                      LOWER(COALESCE(j.job_type, '')) = 'pipeline'
+                      OR LOWER(TRIM(COALESCE(j.job_name, ''))) LIKE '%complete etl pipeline%'
+                  )
+                """
+            )
+            prow = cursor.fetchone()
+            if prow and prow.get("ts"):
+                pipeline_completed_at = prow["ts"]
+                logger.info("Latest Complete ETL Pipeline completion at %s", pipeline_completed_at)
+        except Exception as pipe_err:
+            logger.warning("Could not fetch pipeline completion time: %s", pipe_err, exc_info=True)
         
         for schema in ['bronze', 'silver', 'gold']:
             try:
@@ -529,10 +553,15 @@ def _sync_compute_freshness_dict() -> dict:
                         signal_candidates.append(("etl", etl_completion_times[etl_key], None))
                         if etl_key in etl_records_processed:
                             total_records = etl_records_processed[etl_key]
+                    # Pipeline jobs often complete with layer/table_name NULL; merge that completion into silver/gold.
+                    if schema in ("silver", "gold") and pipeline_completed_at:
+                        signal_candidates.append(("etl", pipeline_completed_at, "pipeline"))
                     
                     # Candidate 2: manual/automatic row-level updates from known timestamp columns.
                     # We collect all candidates and later pick whichever is newest.
                     timestamp_columns = [
+                        '_etl_timestamp',
+                        '_load_timestamp',
                         'ingestion_timestamp',
                         'created_at',
                         'updated_at',
@@ -540,7 +569,7 @@ def _sync_compute_freshness_dict() -> dict:
                         'event_timestamp',
                         'start_time',
                         'date',
-                        'timestamp'
+                        'timestamp',
                     ]
                     latest_column_ts = None
                     latest_column_name = None
@@ -685,10 +714,17 @@ def _sync_compute_freshness_dict() -> dict:
                     reason_lines = []
                     sig = activity_signal or "unknown"
                     if activity_signal == "etl":
-                        reason_lines.append(
-                            f"{qn}: Freshness clock picked from monitoring.job_runs (latest successful completed_at). "
-                            f"This was newer than other available signals."
-                        )
+                        if source_column == "pipeline":
+                            reason_lines.append(
+                                f"{qn}: Freshness clock uses latest Complete ETL Pipeline completion time from "
+                                f"monitoring.job_runs (job rows often have NULL layer/table). "
+                                f"Compared with MAX(timestamp) / pg_stat; newest wins."
+                            )
+                        else:
+                            reason_lines.append(
+                                f"{qn}: Freshness clock picked from monitoring.job_runs (latest successful completed_at per table). "
+                                f"This was newer than other available signals."
+                            )
                     elif activity_signal == "column" and source_column:
                         reason_lines.append(
                             f"{qn}: Freshness clock picked from MAX({source_column}) — newest row-level timestamp "
@@ -770,20 +806,20 @@ def _sync_compute_freshness_dict() -> dict:
                         "reason_lines": t.get("reason_lines") or [],
                     })
                 
-                # Determine overall status
-                # If we couldn't determine freshness for any table, mark the layer as unknown
-                # instead of guessing stale/outdated.
-                any_unknown = any(t.get("status") == "unknown" for t in table_freshness)
+                # Layer SLA rollup: worst status among all tables (not only the first N after sort).
+                # Priority: outdated > stale > unknown > fresh
                 if not table_freshness:
                     overall_status = "outdated"
-                elif any_unknown:
-                    overall_status = "unknown"
-                elif all(t["status"] == "fresh" for t in table_freshness[:3]):
-                    overall_status = "fresh"
-                elif all(t["status"] != "outdated" for t in table_freshness[:3]):
-                    overall_status = "stale"
                 else:
-                    overall_status = "outdated"
+                    statuses = [t.get("status") or "unknown" for t in table_freshness]
+                    if "outdated" in statuses:
+                        overall_status = "outdated"
+                    elif "stale" in statuses:
+                        overall_status = "stale"
+                    elif "unknown" in statuses:
+                        overall_status = "unknown"
+                    else:
+                        overall_status = "fresh"
                 
                 freshness[schema] = {
                     "tables": table_freshness[:10],  # Limit to top 10 most recent for legacy shape
@@ -801,6 +837,12 @@ def _sync_compute_freshness_dict() -> dict:
         sla_total = len(layers_status)
         total_datasets = len(all_datasets)
 
+        pipeline_iso = None
+        if isinstance(pipeline_completed_at, datetime):
+            pipeline_iso = pipeline_completed_at.isoformat()
+        elif pipeline_completed_at is not None:
+            pipeline_iso = str(pipeline_completed_at)
+
         out = {
             "freshness": freshness,
             "sla_met": sla_met,
@@ -811,6 +853,10 @@ def _sync_compute_freshness_dict() -> dict:
             "sla_breach": sla_breach_count,
             "unknown_datasets": unknown_count,
             "total_datasets": total_datasets,
+            # Ground truth from Postgres for dashboards (same counts as datasets grid).
+            "fresh_tables": on_time,
+            "tables_scanned": total_datasets,
+            "pipeline_last_completed_at": pipeline_iso,
             # Document policy for dashboards (must match logic above: hours_ago)
             "sla_policy": {
                 "fresh_max_hours": SLA_FRESH_H,
@@ -845,6 +891,19 @@ def _sync_fetch_etl_errors_dict() -> dict:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
         errors = []
+        failed_runs_total = 0
+        try:
+            cursor.execute(
+                """
+                SELECT COUNT(*)::bigint AS c
+                FROM monitoring.job_runs
+                WHERE status IN ('failed', 'error')
+                """
+            )
+            crow = cursor.fetchone()
+            failed_runs_total = int(crow.get("c", 0) or 0) if crow else 0
+        except Exception:
+            failed_runs_total = 0
 
         try:
             cursor.execute("""
@@ -970,6 +1029,7 @@ def _sync_fetch_etl_errors_dict() -> dict:
             "errors": errors,
             "total": len(errors),
             "active": len([e for e in errors if e.get("status") == "active"]),
+            "failed_runs_total": failed_runs_total,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -1130,11 +1190,18 @@ async def get_etl_dashboard_bundle(
         _safe("throughput", _sync_fetch_throughput_dict),
     )
 
+    frt = 0
+    if isinstance(err_raw, dict) and err_raw.get("failed_runs_total") is not None:
+        try:
+            frt = int(err_raw.get("failed_runs_total") or 0)
+        except (TypeError, ValueError):
+            frt = 0
     out = {
         "jobs": (jobs_raw or {}).get("jobs", []) if isinstance(jobs_raw, dict) else [],
         "jobDefinitions": (defs_raw or {}).get("jobs", []) if isinstance(defs_raw, dict) else [],
         "pipeline": pipeline,
         "errors": (err_raw or {}).get("errors", []) if isinstance(err_raw, dict) else [],
+        "failedRunsTotal": frt,
         "throughput": thr_raw if isinstance(thr_raw, dict) else None,
     }
     _monitoring_cache_set("etl/dashboard-bundle", out)
@@ -1193,11 +1260,18 @@ async def get_etl_monitoring_page(
         _safe("data_quality", fetch_dq),
     )
 
+    frt = 0
+    if isinstance(err_raw, dict) and err_raw.get("failed_runs_total") is not None:
+        try:
+            frt = int(err_raw.get("failed_runs_total") or 0)
+        except (TypeError, ValueError):
+            frt = 0
     out = {
         "jobs": (jobs_raw or {}).get("jobs", []) if isinstance(jobs_raw, dict) else [],
         "jobDefinitions": (defs_raw or {}).get("jobs", []) if isinstance(defs_raw, dict) else [],
         "pipeline": pipeline,
         "errors": (err_raw or {}).get("errors", []) if isinstance(err_raw, dict) else [],
+        "failedRunsTotal": frt,
         "throughput": thr_raw if isinstance(thr_raw, dict) else None,
         "freshness": fresh_raw if isinstance(fresh_raw, dict) else {},
         "dataQuality": dq_raw if isinstance(dq_raw, dict) else {},
@@ -1436,13 +1510,31 @@ def _sync_compute_data_quality_dict() -> dict:
                             factors.append("No ETL timestamp available for this table.")
 
                     quality_score = max(0.0, min(100.0, quality_score))
-                    
+                    status_label = (
+                        "excellent"
+                        if quality_score >= 95
+                        else "good"
+                        if quality_score >= 80
+                        else "fair"
+                        if quality_score >= 60
+                        else "poor"
+                    )
+                    # Lead with an unmistakably table-specific line (each table has its own factors list).
+                    qs_rounded = round(quality_score, 2)
+                    factors.insert(
+                        0,
+                        (
+                            f"{schema}.{table_name}: score {qs_rounded:.2f} ({status_label}) — "
+                            f"{row_count:,} rows counted; {dead_rows:,} dead tuples (pg_stat) for this table."
+                        ),
+                    )
+
                     table_metrics.append({
                         "table": table_name,
                         "row_count": row_count,
                         "dead_rows": dead_rows,
-                        "quality_score": round(quality_score, 2),
-                        "status": "excellent" if quality_score >= 95 else "good" if quality_score >= 80 else "fair" if quality_score >= 60 else "poor",
+                        "quality_score": qs_rounded,
+                        "status": status_label,
                         "factors": factors,
                     })
                 

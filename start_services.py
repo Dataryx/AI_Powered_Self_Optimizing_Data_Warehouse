@@ -57,6 +57,17 @@ if db_utils_path.exists():
         sys.modules['ml_optimization.utils.db_utils'] = db_utils_module
         spec.loader.exec_module(db_utils_module)
 
+sat_format_path = utils_dir / "system_activity_log_format.py"
+if sat_format_path.exists():
+    spec = importlib.util.spec_from_file_location(
+        "ml_optimization.utils.system_activity_log_format",
+        sat_format_path,
+    )
+    if spec and spec.loader:
+        sat_module = importlib.util.module_from_spec(spec)
+        sys.modules["ml_optimization.utils.system_activity_log_format"] = sat_module
+        spec.loader.exec_module(sat_module)
+
 # Load config module (needed by ML models)
 config_dir = ml_opt_dir / "config"
 model_config_path = config_dir / "model_config.py"

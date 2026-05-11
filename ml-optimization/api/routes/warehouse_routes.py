@@ -287,8 +287,27 @@ def get_table_stats(schema: str, table: str):
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            qualified = f"{schema}.{table}"
-            quoted = '"' + schema.replace('"', '""') + '"."' + table.replace('"', '""') + '"'
+
+            # Resolve catalog relname — pg_stat_user_tables.relname must match pg_class.relname exactly.
+            cursor.execute(
+                """
+                SELECT c.relname
+                FROM pg_catalog.pg_class c
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = %s
+                  AND c.relkind IN ('r', 'p')
+                  AND lower(c.relname) = lower(%s)
+                LIMIT 1
+                """,
+                (schema, table),
+            )
+            rel_name_row = cursor.fetchone()
+            if not rel_name_row:
+                raise HTTPException(status_code=404, detail=f"Table {schema}.{table} not found")
+            canon_table = rel_name_row[0]
+
+            qualified = f"{schema}.{canon_table}"
+            quoted = '"' + schema.replace('"', '""') + '"."' + canon_table.replace('"', '""') + '"'
             
             # Row count (identifiers validated above)
             cursor.execute("SELECT COUNT(*) FROM " + quoted)
@@ -301,15 +320,32 @@ def get_table_stats(schema: str, table: str):
             )
             size_info = cursor.fetchone()
             
-            # Column count and last updated (from pg_stat_user_tables)
+            # Stats: pg_stat_user_tables first; fallback pg_stat_all_tables (same fields for ordinary tables)
             cursor.execute(
-                "SELECT n_live_tup, last_vacuum, last_autovacuum, last_analyze, last_autoanalyze FROM pg_stat_user_tables WHERE schemaname = %s AND relname = %s",
-                (schema, table),
+                """
+                SELECT n_live_tup, last_vacuum, last_autovacuum, last_analyze, last_autoanalyze
+                FROM pg_stat_user_tables
+                WHERE schemaname = %s AND relname = %s
+                """,
+                (schema, canon_table),
             )
             stat_row = cursor.fetchone()
+            if stat_row is None:
+                cursor.execute(
+                    """
+                    SELECT n_live_tup, last_vacuum, last_autovacuum, last_analyze, last_autoanalyze
+                    FROM pg_stat_all_tables
+                    WHERE schemaname = %s AND relname = %s
+                    """,
+                    (schema, canon_table),
+                )
+                alt = cursor.fetchone()
+                if alt:
+                    stat_row = alt
+
             cursor.execute(
                 "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = %s AND table_name = %s",
-                (schema, table),
+                (schema, canon_table),
             )
             col_count = cursor.fetchone()[0]
             updated = "Unknown"
@@ -320,24 +356,28 @@ def get_table_stats(schema: str, table: str):
             last_autoanalyze = None
 
             def _ts(val):
-                if not val:
+                if val is None:
                     return None
                 return val.isoformat() if hasattr(val, "isoformat") else str(val)
 
+            raw_ts_list = []
             if stat_row:
                 n_live_tup = stat_row[0]
                 last_vacuum = _ts(stat_row[1])
                 last_autovacuum = _ts(stat_row[2])
                 last_analyze = _ts(stat_row[3])
                 last_autoanalyze = _ts(stat_row[4])
-                for ts in (stat_row[1], stat_row[2], stat_row[3], stat_row[4]):
-                    if ts:
-                        updated = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-                        break
+                raw_ts_list = [x for x in (stat_row[1], stat_row[2], stat_row[3], stat_row[4]) if x is not None]
+
+            if raw_ts_list:
+                latest = max(raw_ts_list)
+                updated = latest.isoformat() if hasattr(latest, "isoformat") else str(latest)
+            elif stat_row is not None:
+                updated = "No vacuum/analyze recorded yet"
 
             return {
                 "schema": schema,
-                "table": table,
+                "table": canon_table,
                 "row_count": row_count,
                 "columns": col_count,
                 "updated": updated,

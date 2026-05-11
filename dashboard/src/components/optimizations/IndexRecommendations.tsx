@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { TableProperties, CheckCircle, Zap, RefreshCw, Loader2, DatabaseZap } from 'lucide-react';
 import { api, formatOptimizationApplyError } from '../../services/api';
 import { recommendationApplySnapshot } from '../../utils/recommendationApplySnapshot';
@@ -22,22 +22,41 @@ function recommendationSourceBadge(src: unknown): { label: string; className: st
 
 export default function IndexRecommendations({ data, loading, onRefetch }: IndexRecommendationsProps) {
   const [applyingId, setApplyingId] = useState<string | null>(null);
+  /** Inline strip under header — no browser dialog or OS notification. */
+  const [implementNotice, setImplementNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  /** Rows removed from this list after a successful implement (status lives in Optimization History). */
+  const [dismissedIds, setDismissedIds] = useState<Record<string, true>>({});
   const [applyFeedback, setApplyFeedback] = useState<{ id: string; ok: boolean; msg: string } | null>(null);
-  const [optimisticallyApplied, setOptimisticallyApplied] = useState<Record<string, true>>({});
-  const [alreadySatisfied, setAlreadySatisfied] = useState<Record<string, true>>({});
+
+  useEffect(() => {
+    if (!implementNotice) return;
+    const t = setTimeout(() => setImplementNotice(null), 8000);
+    return () => clearTimeout(t);
+  }, [implementNotice]);
 
   useEffect(() => {
     if (!applyFeedback) return;
-    const t = setTimeout(() => setApplyFeedback(null), 6000);
+    const t = setTimeout(() => setApplyFeedback(null), 8000);
     return () => clearTimeout(t);
   }, [applyFeedback]);
 
   const allRecs = Array.isArray(data?.recommendations) ? data.recommendations : [];
-  const recs = allRecs.filter((r: any) => r?.type === 'index' || !r?.type);
+  const recs = useMemo(() => {
+    return allRecs
+      .filter((r: any) => r?.type === 'index' || !r?.type)
+      .filter((r: any) => {
+        const sid = r?.recommendation_id as string | undefined;
+        if (!sid) return true;
+        if (dismissedIds[sid]) return false;
+        if (String(r?.status ?? '').toLowerCase() === 'applied') return false;
+        return true;
+      });
+  }, [allRecs, dismissedIds]);
 
-  async function handleImplementIndex(rec: any) {
+  async function handleImplementIndex(rec: any): Promise<void> {
     const id = rec?.recommendation_id;
     if (!id || applyingId) return;
+    const label = rec?.table ?? rec?.table_name ?? 'table';
     setApplyingId(id);
     setApplyFeedback(null);
     try {
@@ -47,15 +66,11 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
         recommendationApplySnapshot(rec as Record<string, unknown>),
       );
       if (res.outcome === 'already_satisfied') {
-        setAlreadySatisfied((prev) => ({ ...prev, [id]: true }));
-        setApplyFeedback({
-          id,
+        setDismissedIds((p) => ({ ...p, [id]: true }));
+        setImplementNotice({
           ok: true,
-          msg:
-            res.detail ||
-            'An index for this column already exists, so no new change was needed.',
+          text: `Index already in place for ${label} — recorded in Optimization History below.`,
         });
-        onRefetch?.();
         return;
       }
       if (res.persisted !== true) {
@@ -67,15 +82,14 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
         });
         return;
       }
-      setOptimisticallyApplied((prev) => ({ ...prev, [id]: true }));
-      setApplyFeedback({
-        id,
+      setDismissedIds((p) => ({ ...p, [id]: true }));
+      const name = res.created_index_name ? String(res.created_index_name) : '';
+      setImplementNotice({
         ok: true,
-        msg: res.created_index_name
-          ? `Created index ${res.created_index_name}. See Optimization History for details.`
-          : 'Index created successfully. See Optimization History for details.',
+        text: name
+          ? `Index implemented (${name}) for ${label}. See Optimization History below.`
+          : `Index implemented for ${label}. See Optimization History below.`,
       });
-      onRefetch?.();
     } catch (e) {
       setApplyFeedback({
         id,
@@ -114,6 +128,19 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
         </div>
       </div>
 
+      {implementNotice && (
+        <div
+          className={`mx-5 mb-1 flex items-start gap-2 rounded-lg border px-3 py-2 text-left ${
+            implementNotice.ok
+              ? 'border-topo-4/45 bg-topo-4/10 text-topo-4'
+              : 'border-red-500/35 bg-red-500/10 text-red-600 dark:text-red-400'
+          }`}
+          role="status"
+        >
+          <CheckCircle size={14} className="shrink-0 mt-0.5 opacity-90" aria-hidden />
+          <p className="font-mono text-[11px] leading-snug m-0">{implementNotice.text}</p>
+        </div>
+      )}
       {/* Content */}
       <div className="px-5 pb-4">
         {loading && recs.length === 0 && (
@@ -133,11 +160,6 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
               const priorityColor = priority === 'high' ? 'bg-amber-500/20 text-amber-400' : priority === 'medium' ? 'bg-topo-4/20 text-topo-4' : 'bg-ink-faint/20 text-ink-muted';
               const srcBadge = recommendationSourceBadge(r?.recommendation_source);
               const rid = r?.recommendation_id as string | undefined;
-              const isApplied =
-                Boolean(rid && optimisticallyApplied[rid]) ||
-                String(r?.status ?? '').toLowerCase() === 'applied';
-              const isAlreadySatisfied = Boolean(rid && alreadySatisfied[rid]);
-              const implementDone = isApplied || isAlreadySatisfied;
               return (
                 <motion.div
                   key={r?.recommendation_id ?? i}
@@ -185,28 +207,14 @@ export default function IndexRecommendations({ data, loading, onRefetch }: Index
                   <div className="mt-3 pt-3 border-t border-contour/60 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <button
                       type="button"
-                      disabled={!rid || applyingId === rid || implementDone}
+                      disabled={!rid || applyingId === rid}
                       onClick={() => handleImplementIndex(r)}
-                      className={`inline-flex items-center justify-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wide px-3 py-2 rounded-lg border transition-all disabled:pointer-events-none ${
-                        implementDone
-                          ? 'bg-slate-800/60 text-teal-300/95 border-teal-500/35'
-                          : 'bg-gradient-to-br from-teal-500 to-cyan-600 text-white border-teal-400/40 shadow-md shadow-teal-950/25 hover:from-teal-400 hover:to-cyan-500 hover:shadow-teal-900/30 disabled:opacity-45'
-                      }`}
+                      className="inline-flex items-center justify-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wide px-3 py-2 rounded-lg border transition-all disabled:pointer-events-none bg-gradient-to-br from-teal-500 to-cyan-600 text-white border-teal-400/40 shadow-md shadow-teal-950/25 hover:from-teal-400 hover:to-cyan-500 hover:shadow-teal-900/30 disabled:opacity-45"
                     >
                       {applyingId === rid ? (
                         <>
                           <Loader2 size={14} className="animate-spin shrink-0 text-cyan-100" />
                           Applying…
-                        </>
-                      ) : isAlreadySatisfied ? (
-                        <>
-                          <CheckCircle size={14} className="shrink-0 text-sky-400" />
-                          Already indexed
-                        </>
-                      ) : isApplied ? (
-                        <>
-                          <CheckCircle size={14} className="shrink-0 text-teal-400" />
-                          Applied
                         </>
                       ) : (
                         <>

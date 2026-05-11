@@ -1,0 +1,361 @@
+================================================================================
+SYSTEM SCRIPT — STUDENT EXPLANATION TO PROFESSOR
+Data Warehouse Dashboard and ML Optimization Stack
+================================================================================
+Sumit Singh | Supervisor: Dr. Duy H. Ho, CSUF Department of Computer Science
+
+Purpose of this document
+--------------------------------------------------------------------------------
+Below I explain, as I would in a seminar or defense, how I implemented each major
+part of the React dashboard and how it connects to the FastAPI backend and the
+machine-learning artifacts. I describe what each page is for, how I fetch data,
+why I structured the client that way, and how model outputs appear in the UI.
+If you prefer a neutral audience, you may replace “Professor” with “committee”
+or read it as a general technical narrative.
+
+How I would open this explanation orally
+--------------------------------------------------------------------------------
+Professor, in my project I wanted one coherent story from PostgreSQL telemetry
+to ranked recommendations and a usable UI. The frontend is a React application;
+it calls a versioned REST API and, on the Optimizations page, a WebSocket where
+I needed near-real-time updates. I organized the following sections by dashboard
+page so you can follow the same order I use when I demo the system.
+
+--------------------------------------------------------------------------------
+Stack overview (how I would summarize the architecture)
+--------------------------------------------------------------------------------
+I built the dashboard under dashboard/src/ using React and Vite. The browser sends
+REST requests to VITE_API_BASE_URL, which I default to http://localhost:8000/api/v1
+unless I configure otherwise in dashboard/.env. For WebSockets I derive the
+same host from that URL, or I set VITE_WS_BASE_URL when the socket endpoint runs
+elsewhere.
+
+On the server side I use FastAPI in ml-optimization/api/main.py. I mount routers
+under /api/v1 for warehouse metadata, ETL monitoring, storage, alerts, optimization,
+system logs, and WebSockets.
+
+The database is PostgreSQL. I use bronze, silver, and gold for the medallion
+layers; monitoring for ETL jobs, runs, and pipeline metadata; and ml_optimization
+for query logs, recommendation history, and anything that feeds my models. I also
+read PostgreSQL system catalogs and pg_stat_* views for health, I/O, and table
+statistics.
+
+I trained models and saved artifacts under the ML project (for example workload
+clustering as a pickle, query-time prediction including XGBoost JSON where I
+exported it, cache_predictor, and an Isolation Forest-based anomaly detector).
+At request time the API loads those artifacts. When a model file is missing or
+there is no data, I return degraded_mode and degraded_reason in JSON so the UI
+can explain the situation instead of failing silently.
+
+================================================================================
+1. Data Warehouse Dashboard (home) — DashboardPage
+================================================================================
+
+What I built this page to show
+--------------------------------------------------------------------------------
+This is the landing page I use to convince a viewer that the warehouse is alive:
+counts and sizes per medallion layer, sales KPIs, a trend chart, top products,
+a short list of active alerts, and health status in the top bar. It answers at a
+glance whether Gold is populated and whether my API is reachable.
+
+How I fetch the data
+--------------------------------------------------------------------------------
+I centralized loading in the hook useDashboardData (dashboard/src/hooks/useDashboardData.ts).
+
+My preferred path is one bundle: GET /warehouse/home-dashboard via api.getHomeDashboard().
+I split the JSON into summary (warehouse-wide totals per layer), sales (totals,
+daily series, top products), customers, alerts for the strip on the home page,
+and health for connection status.
+
+If that bundle returns 404 on an older deployment, I fall back to parallel calls:
+getWarehouseSummary, getSalesStats, getCustomerStats, getActiveAlerts, getHealth.
+
+I added loadHomeDashboardOnce so concurrent mounts (for example React Strict Mode)
+do not duplicate identical requests. The refresh interval comes from
+useDashboardRefreshIntervalMs() tied to monitoring preferences; silent refreshes
+avoid flashing the initial loading state.
+
+How I present it and handle errors
+--------------------------------------------------------------------------------
+The page composes HeroSection, KeyMetrics, MedallionTiers, SalesTrend, TopProducts,
+TopBar, and Footer. If something fails, I show a banner with retry; if only part
+of the payload arrives, I still render what succeeded.
+
+Why I designed it this way
+--------------------------------------------------------------------------------
+I wanted a single round trip for the home page so demos stay responsive. The
+fallback preserves compatibility if someone runs an older API. The medallion
+blocks match how I describe the thesis (Bronze to Silver to Gold), and the KPIs
+ground the story in analytics-ready Gold data.
+
+================================================================================
+2. ETL Monitoring page — MonitoringPage
+================================================================================
+
+What I built this page to show
+--------------------------------------------------------------------------------
+Here I surface operational health: summary ETL statistics, a lineage or DAG view,
+recent runs, a panel to trigger jobs manually, data freshness compared to
+thresholds I treat like SLA checkpoints, and data-quality summaries by layer. I
+support hash links such as #monitoring-lineage so I can jump to a section during
+a presentation.
+
+How I fetch the data
+--------------------------------------------------------------------------------
+I use useMonitoringData (dashboard/src/hooks/useMonitoringData.ts).
+
+My first choice is GET /monitoring/etl/monitoring-page, which returns jobs,
+definitions, pipeline, errors, throughput, freshness, and data quality together.
+I can append ?refresh=true when I need to bypass server-side caches.
+
+In parallel I call GET /alerts/anomalies so the stats row can show an anomaly
+count that stays consistent with the Alerts page.
+
+If monitoring-page is missing, I fall back to GET /monitoring/etl/dashboard-bundle
+plus separate freshness and data-quality calls. If that still fails, I issue the
+legacy parallel set: ETL jobs, definitions, pipeline DAG, freshness, errors,
+data quality, throughput.
+
+I poll on the same refresh interval as the home dashboard. For failed run totals
+I read failedRunsTotal from the payload rather than inferring from the mixed
+errors array. For anomalies I take total from the API or count the array.
+
+Main pieces of the UI and what they consume
+--------------------------------------------------------------------------------
+ETLStats summarizes jobs, failures, throughput, and anomaly count. LineageVisualization
+reads the pipeline object. RecentETLRuns and ManualETLJobRunner use jobs and
+definitions; when I trigger a job manually I POST /monitoring/etl/run with job_name.
+DataFreshness and DataQuality receive their respective payloads; refetch can pass
+refresh=true.
+
+Why I designed it this way
+--------------------------------------------------------------------------------
+ETL produces many small facts; batching them on the server matches how I think
+about “one monitoring screen” and avoids N+1 HTTP chatter in the browser. I keep
+the anomaly count aligned with /alerts/anomalies so Professor, when you compare
+Monitoring and Alerts, you see the same notion of anomaly volume.
+
+================================================================================
+3. Data Explorer page — DataExplorerPage
+================================================================================
+
+What I built this page to show
+--------------------------------------------------------------------------------
+This page lets me browse tables by medallion layer, filter by name, and open a
+modal with row counts, size, estimated live tuples, and full column definitions.
+I ship a static allTables list so the grid is never empty before the API responds;
+when discovery succeeds, I replace that list with live schema results.
+
+How I fetch the data
+--------------------------------------------------------------------------------
+On load I call GET /warehouse/schemas, then for each schema GET /warehouse/tables/{schema}.
+I map bronze, silver, and gold to my Bronze, Silver, and Gold tabs.
+
+For each card I optionally call GET /warehouse/stats/{schema}/{table} to fill in
+column counts; if that fails I keep a sensible default.
+
+In the detail modal I call in parallel GET /warehouse/stats/{schema}/{table} for
+facts like row_count and size, and GET /warehouse/data/{schema}/{table}?limit=0&offset=0
+to retrieve column metadata without transferring sample rows.
+
+Why I designed it this way
+--------------------------------------------------------------------------------
+I included this view so you or a committee member can verify that facts and
+dimensions exist and are sized plausibly. Using limit=0 for metadata avoids
+pulling large result sets when I only need column names and types.
+
+================================================================================
+4. Optimizations page — OptimizationsPage
+================================================================================
+
+What I built this page to show
+--------------------------------------------------------------------------------
+This is where I present index and partition recommendations (from models and heuristics),
+query performance over a selectable window (I label 7, 30, and 90 days), optimization
+history, and optional Implement actions that POST DDL when policy allows. The
+header indicates whether I am on the WebSocket stream or on HTTP polling fallback.
+
+How I fetch the data
+--------------------------------------------------------------------------------
+I wrapped everything in useOptimizationsData(performanceDays).
+
+For recommendations and history I use useOptimizationRealtimeWebSocket. It connects
+to WS /api/v1/ws/optimization-stream. I also prefetch pending recommendations and
+history over HTTP immediately so the screen does not stay blank waiting for the first
+socket frame. If the socket drops, I poll on the same interval. Internally the stream
+fixes query performance at seven days; separately I load the visible query-performance
+table for whatever range the user selects via useQueryPerformanceFetch and
+GET /optimization/query-performance with UTC bounds from utcPerformanceDateRange.
+
+The time-range labels map through daysFromLabel; I initialize from monitoring
+preferences so this page stays philosophically aligned with Analytics retention.
+
+Components include IndexRecommendations, PartitionRecommendations, QueryPerformance,
+OptimizationHistory; apply goes through api.applyOptimization.
+
+How the backend ties in (as I explain it)
+--------------------------------------------------------------------------------
+On the server, optimization_routes.py merges model-based scoring when QueryTimePredictor
+and related logic are available with SQL and catalog analysis over ml_optimization.query_logs.
+POST .../recommendations/{id}/apply runs guarded DDL; I treat HTTP 409 already satisfied
+as success on the client when the index already exists.
+
+Why I designed it this way
+--------------------------------------------------------------------------------
+I separated streaming recommendations from windowed query performance so I can change
+the date range without tearing down the WebSocket. That mirrors operations: current
+recommendations versus historical workload for the quarter.
+
+================================================================================
+5. Analytics page — AnalyticsPage
+================================================================================
+
+What I built this page to show
+--------------------------------------------------------------------------------
+This page is for interpretation: headline metrics, slow-query impact across windows,
+busy hours from rolled-up logs, Smart insights from workload clustering and cache
+candidates, ML hotspots from deterministic trend logic on the same performance slices,
+and optional storage and cost when those endpoints succeed.
+
+How I fetch the data
+--------------------------------------------------------------------------------
+useAnalyticsData is my core hook. I prefer GET /optimization/analytics-dashboard-bundle
+with limits and performance_days_long tied to Settings data retention via useRetentionDays.
+
+The bundle must include three query-performance shapes for one day, seven days, and
+the long window; I validate with isPerfPayloadLike. I also receive rollups, hourly
+call totals in UTC, peak hour metadata, and contract fields such as data_watermark_utc
+and degraded flags.
+
+If the bundle fails, I fall back to getAnalyticsPageBundle plus three parallel
+getQueryPerformance calls and mark metadata degraded.
+
+Storage and cost load asynchronously with a fifteen-second client timeout so slow
+storage endpoints do not block the charts.
+
+useWorkloadCacheInsights calls GET /optimization/workload-clusters with a five-thousand-row
+sample and GET /optimization/cache-candidates with parameters I tuned for a manageable
+list and ranked cache probability.
+
+Main UI pieces
+--------------------------------------------------------------------------------
+AnalyticsStats, QueryPerformanceImpact, WorkloadPatterns, WorkloadCacheMlPanels,
+and MLHotspotTimeline. The hotspot panel is important to describe honestly: I compute
+ranks from average latency across windows and an impact-style score from calls times
+latency; it is not a separate neural network—it is transparent trend logic on the
+same slices as the slow-query tables.
+
+Why I designed it this way
+--------------------------------------------------------------------------------
+I needed the charts to match SQL rollups in the database so my evaluation story stays
+honest. I separated Smart insights (clusters and cache probabilities) from hotspots
+(trend math) so I do not overclaim model coverage where I am only combining logged
+statistics.
+
+================================================================================
+6. Alerts page — AlertsPage
+================================================================================
+
+What I built this page to show
+--------------------------------------------------------------------------------
+Three tabs: Inbox for active alerts, Anomalies for a hybrid of rules and ML output,
+Incidents for tracked records. I support acknowledgment one at a time or in batch,
+pagination, severity styling, and detail drawers.
+
+How I fetch the data
+--------------------------------------------------------------------------------
+useAlertsData prefers GET /alerts/page-bundle with active, anomalies, and incidents.
+If that fails with 404 or certain server errors, I split into getActiveAlerts,
+getAnomalies, getIncidents and rebuild simple counts on the client.
+
+I poll using useAlertPollIntervalMs from preferences. Acknowledgment uses POST
+/alerts/acknowledge/{id} or POST /alerts/acknowledge-batch.
+
+How anomalies are produced (as I would cite my implementation)
+--------------------------------------------------------------------------------
+In alert_routes I combine Isolation Forest scoring on recent ml_optimization.query_logs
+with heuristics such as failed ETL runs from monitoring.job_runs, insert-rate drops
+from pg_stat_user_tables, and other table-footprint checks documented in the route
+module. Active alerts come largely from catalog and statistics driven rules.
+
+Why I designed it this way
+--------------------------------------------------------------------------------
+Bundling matches what I did on Analytics for fewer round trips under load. Split
+fallback lets partial data show during outages. Mixing Isolation Forest with SQL
+heuristics ties anomalies to both behavioral telemetry and structural database signals.
+
+================================================================================
+7. Machine learning — models, data, and what appears in the UI
+================================================================================
+
+Foundation I rely on
+--------------------------------------------------------------------------------
+I persist workload observations into ml_optimization.query_logs (fed from pg_stat_statements
+style collection in my pipeline). Those rows give me text or hashes, timing, I/O,
+and timestamps so I can train supervised latency models, unsupervised clusters, and
+anomaly scores.
+
+Workload clustering (Smart insights panel)
+--------------------------------------------------------------------------------
+I implemented WorkloadClusterer in ml-optimization/models/workload_clustering.py.
+I engineer features such as normalized execution time and complexity proxies, apply
+StandardScaler, optionally PCA when dimension grows, and fit KMeans or DBSCAN per my
+configuration.
+
+At serving time GET /optimization/workload-clusters loads my saved model, pulls a
+recent sample from query_logs, assigns cluster_id, aggregates counts and profiles,
+and returns examples; pagination goes through /workload-clusters/{cluster_id}/queries.
+WorkloadCacheMlPanels displays that structure and lets me page through representative
+queries.
+
+Cache benefit prediction
+--------------------------------------------------------------------------------
+I trained CachePredictor and expose rankings via /optimization/cache-candidates with
+a cache_probability field for the Analytics smart panels.
+
+Query time prediction (recommendations)
+--------------------------------------------------------------------------------
+QueryTimePredictor loads from pickle or XGBoost JSON depending on how I exported it.
+I use it when scoring candidate indexes and partitions.
+
+Anomaly detection
+--------------------------------------------------------------------------------
+QueryAnomalyDetector uses sklearn IsolationForest. I surface results in /alerts/anomalies
+with severity derived from scores. In documentation I stress that unsupervised scores
+are not classification accuracy; I describe them as suspicious workload points, not
+guaranteed defects.
+
+Model metrics endpoint
+--------------------------------------------------------------------------------
+GET /optimization/ml-model-metrics lists which artifacts exist and summarizes metrics
+where I saved them—useful if you ask me to defend reproducibility or model health.
+
+================================================================================
+8. Cross-cutting behavior I would mention if you asked
+================================================================================
+
+WebSockets: I use WS /api/v1/ws/optimization-stream for optimization snapshots; the
+client falls back to polling automatically. Project documentation also references
+WS /api/v1/ws/etl-jobs for live ETL updates.
+
+Degraded mode: Analytics shows banners when the bundle or auxiliary storage and cost
+calls fail. ML panels show explanatory text when models are missing or query_logs is
+empty.
+
+Optional telemetry: api.logSystemEvent posts to /system-logs/events; I swallow errors
+so logging never blocks the UI.
+
+Preferences: dashboard/src/settings/monitoringPreferences.ts ties refresh intervals,
+retention, and aggregation choices to what Analytics and Optimizations display.
+
+================================================================================
+Closing (how I would end this explanation)
+--------------------------------------------------------------------------------
+Professor, that is how I structured the dashboard around your requirement for a
+clear path from data through models to operator-facing views. I am happy to go deeper
+on any route, SQL aggregation, or training script if you would like to focus the
+discussion.
+
+================================================================================
+END OF SYSTEM SCRIPT
+================================================================================

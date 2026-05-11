@@ -19,16 +19,39 @@ interface QueryPerformanceProps {
   timeRangeOptions?: string[];
 }
 
-function fmtSeconds(s: number | undefined | null): string {
-  if (s == null || Number.isNaN(s)) return '—';
-  // Sub-second times: avoid toFixed(0) on ms — values under ~0.5 ms were rounding to "0 ms".
-  if (s < 1) {
-    const ms = s * 1000;
-    if (ms === 0) return '0 ms';
-    if (ms < 10) return `${ms.toFixed(2)} ms`;
-    return `${ms.toFixed(1)} ms`;
+/** Duration already in milliseconds (API `*_execution_time_ms`). */
+function fmtDurationMs(ms: number | undefined | null): string {
+  if (ms == null || Number.isNaN(ms)) return '—';
+  if (ms >= 1000) return `${(ms / 1000).toFixed(3)} s`;
+  if (ms < 10) return `${ms.toFixed(2)} ms`;
+  return `${ms.toFixed(1)} ms`;
+}
+
+/** Read latency in ms from payload; prefer explicit *_ms fields over seconds (avoids double-scaling bugs). */
+function latencyMs(q: Record<string, unknown>, base: 'avg' | 'p50' | 'p95' | 'p99' | 'total'): number | null {
+  const msKey =
+    base === 'avg'
+      ? 'avg_execution_time_ms'
+      : base === 'total'
+        ? 'total_execution_time_ms'
+        : `${base}_execution_time_ms`;
+  const rawMs = q[msKey];
+  if (rawMs != null && Number.isFinite(Number(rawMs))) return Number(rawMs);
+  const secKey =
+    base === 'total' ? 'total_execution_time' : `${base}_execution_time`;
+  const sec = q[secKey];
+  if (sec != null && Number.isFinite(Number(sec))) return Number(sec) * 1000;
+  return null;
+}
+
+/** Weighted average = total_ms / runs (ground truth when means were stored with wrong units). */
+function resolvedAvgMs(q: Record<string, unknown>): number | null {
+  const ec = Number(q.execution_count ?? 0);
+  const total = latencyMs(q, 'total');
+  if (ec > 0 && total != null && total > 0) {
+    return total / ec;
   }
-  return `${s.toFixed(3)} s`;
+  return latencyMs(q, 'avg');
 }
 
 function fmtPct01(x: number | undefined | null): string {
@@ -256,9 +279,9 @@ export default function QueryPerformance({
                           {fullHash.length > 22 ? `${fullHash.slice(0, 22)}…` : fullHash}
                         </td>
                         <td className="px-3 py-2 text-ink tabular-nums">{Number(q.execution_count ?? 0).toLocaleString()}</td>
-                        <td className="px-3 py-2 text-ink tabular-nums">{fmtSeconds(q.avg_execution_time)}</td>
-                        <td className="px-3 py-2 text-ink tabular-nums">{fmtSeconds(q.p95_execution_time)}</td>
-                        <td className="px-3 py-2 text-ink tabular-nums">{fmtSeconds(q.total_execution_time)}</td>
+                        <td className="px-3 py-2 text-ink tabular-nums">{fmtDurationMs(resolvedAvgMs(q))}</td>
+                        <td className="px-3 py-2 text-ink tabular-nums">{fmtDurationMs(latencyMs(q, 'p95'))}</td>
+                        <td className="px-3 py-2 text-ink tabular-nums">{fmtDurationMs(latencyMs(q, 'total'))}</td>
                         <td className="px-3 py-2 text-ink-muted whitespace-nowrap">
                           {q.last_executed ? formatLocalDateTime(q.last_executed) : '—'}
                         </td>
@@ -275,7 +298,7 @@ export default function QueryPerformance({
                                 <div>
                                   <span className="text-ink-faint uppercase tracking-wider">p50 / p99</span>
                                   <p className="text-ink mt-0.5 tabular-nums">
-                                    {fmtSeconds(q.p50_execution_time)} / {fmtSeconds(q.p99_execution_time)}
+                                    {fmtDurationMs(latencyMs(q, 'p50'))} / {fmtDurationMs(latencyMs(q, 'p99'))}
                                   </p>
                                 </div>
                                 <div>

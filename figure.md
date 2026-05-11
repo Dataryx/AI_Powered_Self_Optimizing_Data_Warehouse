@@ -24,6 +24,35 @@ Each per-figure prompt has the same five sections so the output is consistent ac
 
 ---
 
+## Heading → Image → Master Prompt Index (master mapping)
+
+Use this table to know **exactly which heading in `Report.md` owns which image, and where to find the prompt that produces it**. Every row links to:
+
+- the **detailed master-prompt section** in this file (with full style + data + negatives + matplotlib snippet where applicable),
+- the **one-paragraph prompt** in §Q (drop-in for image generators), and
+- the **suggested image filename** to save under `figures/`.
+
+| # | Report heading (section · page) | Figure | Image file | Detailed prompt | One-paragraph prompt |
+|---|---|---|---|---|---|
+| 1 | **Chapter 1 · §1.4.1 — Primary Research Objectives** (page 4) | Figure 1.1 — Three Pillars of the AI-Powered Self-Optimizing Warehouse | `figures/figure_1_1_three_pillars.png` | [Figure 1.1](#figure-11--three-pillars-of-the-ai-powered-self-optimizing-warehouse) | [Q.1](#q1--figure-11--three-pillars-of-the-ai-powered-self-optimizing-warehouse) |
+| 2 | **Chapter 3 · §3.1.1 — System Architecture Diagram** (page 11) | Figure 3.1 — Four-Layer Project Architecture | `figures/figure_3_1_four_layer_architecture.png` | [Figure 3.1](#figure-31--four-layer-project-architecture-postgresql--ml--fastapi--react) | [Q.2](#q2--figure-31--four-layer-project-architecture-postgresql--ml--fastapi--react) |
+| 3 | **Chapter 3 · §3.6 — Frontend Dashboard Architecture** (page 21) | Figure 3.2 — Optimizations Page Layout | `figures/figure_3_2_optimizations_page.png` | [Figure 3.2](#figure-32--optimizations-page-layout-optimizationspagetsx) | [Q.3](#q3--figure-32--optimizations-page-layout-optimizationspagetsx) |
+| 4 | **Chapter 3 · §3.6 — Frontend Dashboard Architecture** (page 22) | Figure 3.3 — Medallion Tier Distribution | `figures/figure_3_3_medallion_tiers.png` | [Figure 3.3](#figure-33--medallion-tier-distribution-medalliontierstsx) | [Q.4](#q4--figure-33--medallion-tier-distribution-medalliontierstsx) |
+| 5 | **Chapter 5 · §5.1 — Query Time Regression Performance** (page 29) | Figure 5.1 — XGBoost vs. Random Forest vs. Gradient Boosting (MAE) | `figures/figure_5_1_mae_comparison.png` | [Figure 5.1](#figure-51--xgboost-vs-random-forest-vs-gradient-boosting--mae-on-query_logs) | [Q.5](#q5--figure-51--xgboost-vs-random-forest-vs-gradient-boosting--mae-on-query_logs) |
+| 6 | **Chapter 5 · §5.2 — Predicted vs Actual Latency** (page 30) | Figure 5.2 — Predicted vs. Actual Query Latency Scatter | `figures/figure_5_2_predicted_vs_actual.png` | [Figure 5.2](#figure-52--predicted-vs-actual-query-latency-scatter-xgboost) | [Q.6](#q6--figure-52--predicted-vs-actual-query-latency-scatter-xgboost) |
+| 7 | **Chapter 5 · §5.3 — Feature Importance Analysis** (page 31) | Figure 5.3 — Top-15 Feature Importances of the XGBoost Regressor | `figures/figure_5_3_feature_importance.png` | [Figure 5.3](#figure-53--top-15-feature-importances-of-the-xgboost-query-time-regressor) | [Q.7](#q7--figure-53--top-15-feature-importances-of-the-xgboost-query-time-regressor) |
+| 8 | **Chapter 5 · §5.4 — Anomaly Detector Evaluation** (page 32) | Figure 5.4 — Isolation Forest Anomaly Score Distribution | `figures/figure_5_4_anomaly_distribution.png` | [Figure 5.4](#figure-54--isolation-forest-anomaly-score-distribution-on-query_logs) | [Q.8](#q8--figure-54--isolation-forest-anomaly-score-distribution-on-query_logs) |
+| 9 | **Chapter 5 · §5.5 — Workload Cluster Quality** (page 33) | Figure 5.5 — K-Means Cluster Centroids (Five Workload Cohorts) | `figures/figure_5_5_cluster_centroids.png` | [Figure 5.5](#figure-55--k-means-cluster-centroids-across-the-five-workload-cohorts) | [Q.9](#q9--figure-55--k-means-cluster-centroids-across-the-five-workload-cohorts) |
+| 10 | **Chapter 5 · §5.6 — Cache Predictor Evaluation** (page 34) | Figure 5.6 — Random Forest Cache Predictor Calibration Curve | `figures/figure_5_6_cache_calibration.png` | [Figure 5.6](#figure-56--random-forest-cache-predictor-calibration-curve) | [Q.10](#q10--figure-56--random-forest-cache-predictor-calibration-curve) |
+
+> **How to use this index**
+> 1. Pick the report heading you're working on.
+> 2. Open the **Detailed prompt** link for full style guide + data + negative prompt + matplotlib snippet (when the figure is a chart).
+> 3. If you only need a single drop-in paragraph for an image generator, open the **One-paragraph prompt** link (§Q).
+> 4. Save the rendered output to the listed **Image file** path.
+
+---
+
 ## Q — One-Paragraph Prompts (one self-contained paragraph per figure)
 
 > Use these when you want to drop a single block of text into an image generator (DALL·E, Midjourney, Imagen, Nano Banana, Stable Diffusion) **without** also pasting the Global Style Guide. Each paragraph below is fully self-contained: it bundles the visual style, the layout, the verbatim data points, and the negative constraints into one flowing paragraph.
@@ -1038,20 +1067,22 @@ Rules:
 
 ---
 
-## Appendix B — Quick Reference: Figure → Section → Page
+## Appendix B — Quick Reference: Heading → Figure → Page → Asset
 
-| # | Figure | Report § | Page | Asset path (suggested) |
-|---|---|---|---|---|
-| 1 | 1.1 — Three Pillars | §1.4.1 | 4 | `figures/figure_1_1_three_pillars.png` |
-| 2 | 3.1 — Four-Layer Architecture | §3.1.1 | 11 | `figures/figure_3_1_four_layer_architecture.png` |
-| 3 | 3.2 — Optimizations Page | §3.6 | 21 | `figures/figure_3_2_optimizations_page.png` |
-| 4 | 3.3 — Medallion Tiers | §3.6 | 22 | `figures/figure_3_3_medallion_tiers.png` |
-| 5 | 5.1 — MAE Comparison | §5.1 | 29 | `figures/figure_5_1_mae_comparison.png` |
-| 6 | 5.2 — Predicted vs Actual | §5.2 | 30 | `figures/figure_5_2_predicted_vs_actual.png` |
-| 7 | 5.3 — Feature Importance | §5.3 | 31 | `figures/figure_5_3_feature_importance.png` |
-| 8 | 5.4 — Anomaly Distribution | §5.4 | 32 | `figures/figure_5_4_anomaly_distribution.png` |
-| 9 | 5.5 — Cluster Centroids | §5.5 | 33 | `figures/figure_5_5_cluster_centroids.png` |
-| 10 | 5.6 — Cache Calibration | §5.6 | 34 | `figures/figure_5_6_cache_calibration.png` |
+| # | Report.md heading text | Figure | § | Page | Asset path (suggested) |
+|---|---|---|---|---|---|
+| 1 | §1.4.1 Primary Research Objectives | 1.1 — Three Pillars | §1.4.1 | 4 | `figures/figure_1_1_three_pillars.png` |
+| 2 | §3.1.1 System Architecture Diagram | 3.1 — Four-Layer Architecture | §3.1.1 | 11 | `figures/figure_3_1_four_layer_architecture.png` |
+| 3 | §3.6 Frontend Dashboard Architecture | 3.2 — Optimizations Page | §3.6 | 21 | `figures/figure_3_2_optimizations_page.png` |
+| 4 | §3.6 Frontend Dashboard Architecture | 3.3 — Medallion Tiers | §3.6 | 22 | `figures/figure_3_3_medallion_tiers.png` |
+| 5 | §5.1 Query Time Regression Performance | 5.1 — MAE Comparison | §5.1 | 29 | `figures/figure_5_1_mae_comparison.png` |
+| 6 | §5.2 Predicted vs Actual Latency | 5.2 — Predicted vs Actual | §5.2 | 30 | `figures/figure_5_2_predicted_vs_actual.png` |
+| 7 | §5.3 Feature Importance Analysis | 5.3 — Feature Importance | §5.3 | 31 | `figures/figure_5_3_feature_importance.png` |
+| 8 | §5.4 Anomaly Detector Evaluation | 5.4 — Anomaly Distribution | §5.4 | 32 | `figures/figure_5_4_anomaly_distribution.png` |
+| 9 | §5.5 Workload Cluster Quality | 5.5 — Cluster Centroids | §5.5 | 33 | `figures/figure_5_5_cluster_centroids.png` |
+| 10 | §5.6 Cache Predictor Evaluation | 5.6 — Cache Calibration | §5.6 | 34 | `figures/figure_5_6_cache_calibration.png` |
+
+> See the **Heading → Image → Master Prompt Index** near the top of this file for the same mapping with direct links into both the **detailed master prompt** and the **one-paragraph prompt** sections.
 
 ---
 

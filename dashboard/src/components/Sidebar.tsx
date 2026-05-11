@@ -9,7 +9,6 @@ import {
   Lightbulb,
   BarChart3,
   Bell,
-  Settings,
   ChevronLeft,
   ChevronRight,
   X,
@@ -34,7 +33,6 @@ const sections = [
       { id: '/alerts', label: 'Alerts', icon: Bell },
     ],
   },
-  { label: 'SYSTEM', items: [{ id: '/settings', label: 'Settings', icon: Settings }] },
 ];
 
 export default function Sidebar() {

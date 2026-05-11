@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
-import { normalizeQueryPerformance } from '../utils/queryPerformance';
+import { normalizeQueryPerformance, utcPerformanceDateRange } from '../utils/queryPerformance';
 import { parseHourlyCallsUtc7d, parseQueryLogRollup, type QueryLogRollup } from '../utils/analyticsDerived';
 import { useRetentionDays } from './useMonitoringPreferences';
 
@@ -174,18 +174,44 @@ export function useAnalyticsData() {
           performanceDaysLong: retentionDays,
         })) as Record<string, unknown>;
       } catch {
-        // Fallback: older single-page bundle. Do NOT mirror one window into 1d/7d/30d slices,
-        // because analytics timeline views require distinct real windows.
+        // Fallback: pull three UTC calendar windows via REST so ML Hotspot / charts still show DB-backed rows.
         const page = (await api.getAnalyticsPageBundle()) as Record<string, unknown>;
+        const longWin = utcPerformanceDateRange(retentionDays);
+        const win7 = utcPerformanceDateRange(7);
+        const win1 = utcPerformanceDateRange(1);
+        let p1Rest: unknown = [];
+        let p7Rest: unknown = [];
+        let p30Rest: unknown = [];
+        try {
+          ;[p1Rest, p7Rest, p30Rest] = await Promise.all([
+            api.getQueryPerformance({
+              start_date: win1.startDate,
+              end_date: win1.endDate,
+              limit: 200,
+            }),
+            api.getQueryPerformance({
+              start_date: win7.startDate,
+              end_date: win7.endDate,
+              limit: 200,
+            }),
+            api.getQueryPerformance({
+              start_date: longWin.startDate,
+              end_date: longWin.endDate,
+              limit: 200,
+            }),
+          ]);
+        } catch {
+          // Leave slices empty; history/recs still load from page bundle.
+        }
         b = {
-          queryPerformance1d: [],
-          queryPerformance7d: [],
-          queryPerformance30d: [],
+          queryPerformance1d: p1Rest,
+          queryPerformance7d: p7Rest,
+          queryPerformance30d: p30Rest,
           optimizationHistory: page.optimizationHistory,
           recommendations: page.recommendations,
           metadata: {
             degraded_mode: true,
-            degraded_reason: 'dashboard_bundle_failed_no_distinct_query_windows_available',
+            degraded_reason: 'dashboard_bundle_failed_using_rest_query_performance_slices',
           },
         };
       }

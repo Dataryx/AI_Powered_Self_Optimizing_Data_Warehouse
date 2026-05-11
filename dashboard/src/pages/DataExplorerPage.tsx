@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Table2, Layers, Code2, ChevronLeft, Radio, MapPin, Hash, Clock, X, Copy, Check, Database } from 'lucide-react';
+import { Search, Table2, Layers, Code2, ChevronLeft, Radio, MapPin, Hash, X, Copy, Check, Database } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import SidebarPageShell from '../components/SidebarPageShell';
 import MobileMenuButton from '../components/MobileMenuButton';
@@ -13,7 +13,6 @@ interface TableInfo {
   name: string;
   layer: Layer;
   columns: number;
-  updated: string;
 }
 
 type TableColumnsPayload = {
@@ -22,54 +21,54 @@ type TableColumnsPayload = {
 
 const allTables: TableInfo[] = [
   // Bronze - 16 tables
-  { name: 'country', layer: 'Bronze', columns: 8, updated: 'Unknown' },
-  { name: 'customer', layer: 'Bronze', columns: 8, updated: 'Unknown' },
-  { name: 'customer_company', layer: 'Bronze', columns: 7, updated: 'Unknown' },
-  { name: 'customer_employee', layer: 'Bronze', columns: 10, updated: 'Unknown' },
-  { name: 'employment', layer: 'Bronze', columns: 12, updated: 'Unknown' },
-  { name: 'employment_jobs', layer: 'Bronze', columns: 8, updated: 'Unknown' },
-  { name: 'inventory', layer: 'Bronze', columns: 8, updated: 'Unknown' },
-  { name: 'location', layer: 'Bronze', columns: 15, updated: 'Unknown' },
-  { name: 'order_item', layer: 'Bronze', columns: 8, updated: 'Unknown' },
-  { name: 'orders', layer: 'Bronze', columns: 12, updated: 'Unknown' },
-  { name: 'person', layer: 'Bronze', columns: 11, updated: 'Unknown' },
-  { name: 'person_location', layer: 'Bronze', columns: 8, updated: 'Unknown' },
-  { name: 'phone_number', layer: 'Bronze', columns: 9, updated: 'Unknown' },
-  { name: 'product', layer: 'Bronze', columns: 15, updated: 'Unknown' },
-  { name: 'restricted_info', layer: 'Bronze', columns: 10, updated: 'Unknown' },
-  { name: 'warehouse', layer: 'Bronze', columns: 6, updated: 'Unknown' },
+  { name: 'country', layer: 'Bronze', columns: 8 },
+  { name: 'customer', layer: 'Bronze', columns: 8 },
+  { name: 'customer_company', layer: 'Bronze', columns: 7 },
+  { name: 'customer_employee', layer: 'Bronze', columns: 10 },
+  { name: 'employment', layer: 'Bronze', columns: 12 },
+  { name: 'employment_jobs', layer: 'Bronze', columns: 8 },
+  { name: 'inventory', layer: 'Bronze', columns: 8 },
+  { name: 'location', layer: 'Bronze', columns: 15 },
+  { name: 'order_item', layer: 'Bronze', columns: 8 },
+  { name: 'orders', layer: 'Bronze', columns: 12 },
+  { name: 'person', layer: 'Bronze', columns: 11 },
+  { name: 'person_location', layer: 'Bronze', columns: 8 },
+  { name: 'phone_number', layer: 'Bronze', columns: 9 },
+  { name: 'product', layer: 'Bronze', columns: 15 },
+  { name: 'restricted_info', layer: 'Bronze', columns: 10 },
+  { name: 'warehouse', layer: 'Bronze', columns: 6 },
   // Silver - 16 tables
-  { name: 'country', layer: 'Silver', columns: 8, updated: 'Unknown' },
-  { name: 'customer', layer: 'Silver', columns: 8, updated: 'Unknown' },
-  { name: 'customer_company', layer: 'Silver', columns: 7, updated: 'Unknown' },
-  { name: 'customer_employee', layer: 'Silver', columns: 10, updated: 'Unknown' },
-  { name: 'employment', layer: 'Silver', columns: 12, updated: 'Unknown' },
-  { name: 'employment_jobs', layer: 'Silver', columns: 8, updated: 'Unknown' },
-  { name: 'inventory', layer: 'Silver', columns: 8, updated: 'Unknown' },
-  { name: 'location', layer: 'Silver', columns: 15, updated: 'Unknown' },
-  { name: 'order_item', layer: 'Silver', columns: 8, updated: 'Unknown' },
-  { name: 'orders', layer: 'Silver', columns: 12, updated: 'Unknown' },
-  { name: 'person', layer: 'Silver', columns: 11, updated: 'Unknown' },
-  { name: 'person_location', layer: 'Silver', columns: 8, updated: 'Unknown' },
-  { name: 'phone_number', layer: 'Silver', columns: 9, updated: 'Unknown' },
-  { name: 'product', layer: 'Silver', columns: 15, updated: 'Unknown' },
-  { name: 'restricted_info', layer: 'Silver', columns: 10, updated: 'Unknown' },
-  { name: 'warehouse', layer: 'Silver', columns: 6, updated: 'Unknown' },
+  { name: 'country', layer: 'Silver', columns: 8 },
+  { name: 'customer', layer: 'Silver', columns: 8 },
+  { name: 'customer_company', layer: 'Silver', columns: 7 },
+  { name: 'customer_employee', layer: 'Silver', columns: 10 },
+  { name: 'employment', layer: 'Silver', columns: 12 },
+  { name: 'employment_jobs', layer: 'Silver', columns: 8 },
+  { name: 'inventory', layer: 'Silver', columns: 8 },
+  { name: 'location', layer: 'Silver', columns: 15 },
+  { name: 'order_item', layer: 'Silver', columns: 8 },
+  { name: 'orders', layer: 'Silver', columns: 12 },
+  { name: 'person', layer: 'Silver', columns: 11 },
+  { name: 'person_location', layer: 'Silver', columns: 8 },
+  { name: 'phone_number', layer: 'Silver', columns: 9 },
+  { name: 'product', layer: 'Silver', columns: 15 },
+  { name: 'restricted_info', layer: 'Silver', columns: 10 },
+  { name: 'warehouse', layer: 'Silver', columns: 6 },
   // Gold - 14 tables
-  { name: 'fact_sales', layer: 'Gold', columns: 12, updated: 'Unknown' },
-  { name: 'fact_orders', layer: 'Gold', columns: 10, updated: 'Unknown' },
-  { name: 'dim_customer', layer: 'Gold', columns: 14, updated: 'Unknown' },
-  { name: 'dim_product', layer: 'Gold', columns: 11, updated: 'Unknown' },
-  { name: 'dim_location', layer: 'Gold', columns: 9, updated: 'Unknown' },
-  { name: 'dim_date', layer: 'Gold', columns: 8, updated: 'Unknown' },
-  { name: 'dim_warehouse', layer: 'Gold', columns: 6, updated: 'Unknown' },
-  { name: 'dim_employee', layer: 'Gold', columns: 10, updated: 'Unknown' },
-  { name: 'agg_customer_lifetime', layer: 'Gold', columns: 8, updated: 'Unknown' },
-  { name: 'agg_product_performance', layer: 'Gold', columns: 9, updated: 'Unknown' },
-  { name: 'agg_monthly_sales', layer: 'Gold', columns: 7, updated: 'Unknown' },
-  { name: 'agg_daily_revenue', layer: 'Gold', columns: 6, updated: 'Unknown' },
-  { name: 'agg_warehouse_inventory', layer: 'Gold', columns: 8, updated: 'Unknown' },
-  { name: 'agg_regional_sales', layer: 'Gold', columns: 7, updated: 'Unknown' },
+  { name: 'fact_sales', layer: 'Gold', columns: 12 },
+  { name: 'fact_orders', layer: 'Gold', columns: 10 },
+  { name: 'dim_customer', layer: 'Gold', columns: 14 },
+  { name: 'dim_product', layer: 'Gold', columns: 11 },
+  { name: 'dim_location', layer: 'Gold', columns: 9 },
+  { name: 'dim_date', layer: 'Gold', columns: 8 },
+  { name: 'dim_warehouse', layer: 'Gold', columns: 6 },
+  { name: 'dim_employee', layer: 'Gold', columns: 10 },
+  { name: 'agg_customer_lifetime', layer: 'Gold', columns: 8 },
+  { name: 'agg_product_performance', layer: 'Gold', columns: 9 },
+  { name: 'agg_monthly_sales', layer: 'Gold', columns: 7 },
+  { name: 'agg_daily_revenue', layer: 'Gold', columns: 6 },
+  { name: 'agg_warehouse_inventory', layer: 'Gold', columns: 8 },
+  { name: 'agg_regional_sales', layer: 'Gold', columns: 7 },
 ];
 
 const layerConfig: Record<Layer, { icon: React.ElementType; accent: string; bg: string; border: string; badge: string; badgeText: string; count: number; dotBg: string }> = {
@@ -152,13 +151,11 @@ export default function DataExplorerPage() {
             const names = rawNames.map((n: any) => typeof n === 'string' ? n : (n?.name ?? n?.table_name ?? String(n)));
             for (const name of names) {
               let columns = 8;
-              let updated = 'Unknown';
               try {
                 const stats = await import('../services/api').then((m) => m.api.getTableStats(schemaName, name));
                 columns = (stats as any)?.columns ?? 8;
-                updated = (stats as any)?.updated ?? 'Unknown';
               } catch (_) {}
-              result.push({ name: String(name), layer, columns, updated });
+              result.push({ name: String(name), layer, columns });
             }
           } catch (_) {}
         }
@@ -366,25 +363,13 @@ export default function DataExplorerPage() {
                     </span>
 
                     {/* Stats */}
-                    <div className="mt-4 space-y-2">
+                    <div className="mt-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <Hash size={11} className="text-ink-faint" />
                           <span className="font-mono text-[11px] text-ink-muted">Columns</span>
                         </div>
                         <span className="font-body text-sm font-bold text-ink">{table.columns}</span>
-                      </div>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-1.5">
-                          <Clock size={11} className="text-ink-faint" />
-                          <span className="font-mono text-[11px] text-ink-muted">Updated</span>
-                        </div>
-                        <span
-                          className="font-mono text-[11px] text-ink-faint text-right break-words leading-tight max-w-[56%]"
-                          title={table.updated}
-                        >
-                          {table.updated}
-                        </span>
                       </div>
                     </div>
 
@@ -473,7 +458,7 @@ export default function DataExplorerPage() {
                   <p className="font-mono text-[11px] text-ink-muted">
                     Medallion layer: <span className="text-ink font-semibold">{selectedTable.layer}</span>
                     {' · '}
-                    Card snapshot: {selectedTable.columns} cols, updated {selectedTable.updated}
+                    Card snapshot: {selectedTable.columns} cols
                   </p>
                 </div>
                 <button
@@ -527,26 +512,6 @@ export default function DataExplorerPage() {
                             {tableStats.size_bytes.toLocaleString()} bytes
                           </p>
                         )}
-                      </div>
-                    </div>
-                    <div className="mt-3 rounded-xl border border-contour bg-base/40 p-3 space-y-1.5">
-                      <p className="font-mono text-[10px] text-ink-muted">
-                        <span className="text-ink-faint">Last stats activity: </span>
-                        {tableStats.updated ?? 'Unknown'}
-                      </p>
-                      <div className="grid sm:grid-cols-2 gap-2 font-mono text-[10px] text-ink-muted">
-                        <span title={tableStats.last_vacuum ?? ''}>
-                          Vacuum: {tableStats.last_vacuum ?? '—'}
-                        </span>
-                        <span title={tableStats.last_autovacuum ?? ''}>
-                          Autovacuum: {tableStats.last_autovacuum ?? '—'}
-                        </span>
-                        <span title={tableStats.last_analyze ?? ''}>
-                          Analyze: {tableStats.last_analyze ?? '—'}
-                        </span>
-                        <span title={tableStats.last_autoanalyze ?? ''}>
-                          Autoanalyze: {tableStats.last_autoanalyze ?? '—'}
-                        </span>
                       </div>
                     </div>
                   </section>

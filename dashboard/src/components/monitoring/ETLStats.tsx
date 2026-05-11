@@ -10,30 +10,75 @@ type EtlStatRow = {
   sub?: string;
 };
 
+function formatMlAnomalyCount(data: any): string {
+  const n = data?.mlAnomalyCount;
+  if (n == null || !Number.isFinite(Number(n))) return '—';
+  return String(Math.max(0, Math.floor(Number(n))));
+}
+
+/** Prefer server COUNT on job_runs; never use errors.length (mixed diagnostic rows). */
+function parseFailedRunsTotal(data: any): number | null {
+  const raw = data?.failedRunsTotal ?? data?.failed_runs_total;
+  if (raw === '' || raw == null) return null;
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.floor(n));
+}
+
+function formatFailedRunsCount(data: any): string {
+  const n = parseFailedRunsTotal(data);
+  return n !== null ? String(n) : '—';
+}
+
 const defaultStats: EtlStatRow[] = [
   { label: 'Active Pipelines', value: '0', icon: Zap, color: '#3ecfff' },
-  { label: 'Failed Runs (24h)', value: '0', icon: XCircle, color: '#f87171' },
-  { label: 'Data Freshness SLA', value: '0/0', icon: ShieldCheck, color: '#34d399', badge: 'On time' },
+  { label: 'Failed Runs', value: '0', icon: XCircle, color: '#f87171', sub: 'All time' },
+  { label: 'Data Freshness SLA', value: '0/0', icon: ShieldCheck, color: '#5a6a8a', sub: 'Tables fresh vs scanned (Postgres)' },
   { label: 'Avg ETL Duration', value: '0s', icon: Clock, color: '#fbbf24', sub: '+0s vs baseline' },
-  { label: 'ML-Detected Anomalies', value: '0', icon: Brain, color: '#a78bfa' },
+  { label: 'ML-Detected Anomalies', value: '—', icon: Brain, color: '#a78bfa' },
 ];
 
 function buildStats(data: any): EtlStatRow[] {
   const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
   const active = jobs.filter((j: any) => j?.status === 'running' || j?.status === 'pending').length;
-  const failed24h = Array.isArray(data?.errors) ? data.errors.length : 0;
+  const failedRuns = formatFailedRunsCount(data);
   const freshness = data?.freshness;
-  const slaMet = freshness?.sla_met ?? 0;
-  const slaTotal = freshness?.sla_total ?? 0;
+  /** Prefer table-level counts from `/monitoring/etl/freshness` (same as Data Freshness grid). */
+  const td = Number(freshness?.total_datasets ?? freshness?.tables_scanned);
+  const up = Number(freshness?.on_time ?? freshness?.fresh_tables);
+  const useTables = Number.isFinite(td) && td > 0 && Number.isFinite(up);
+  const slaMet = useTables ? Math.max(0, Math.floor(up)) : Number(freshness?.sla_met ?? 0);
+  const slaTotal = useTables ? Math.max(0, Math.floor(td)) : Number(freshness?.sla_total ?? 0);
+  let slaColor = '#34d399';
+  let slaBadge: string | undefined;
+  if (slaTotal > 0) {
+    if (slaMet >= slaTotal) {
+      slaBadge = 'On time';
+      slaColor = '#34d399';
+    } else if (slaMet <= 0) {
+      slaBadge = 'Behind';
+      slaColor = '#f87171';
+    } else {
+      slaBadge = 'Partial';
+      slaColor = '#fbbf24';
+    }
+  }
   const avgDur = data?.jobs?.length
     ? (jobs.reduce((s: number, j: any) => s + (j?.duration_seconds ?? 0), 0) / jobs.length).toFixed(0) + 's'
     : '0s';
   return [
     { label: 'Active Pipelines', value: String(active), icon: Zap, color: '#3ecfff' },
-    { label: 'Failed Runs (24h)', value: String(failed24h), icon: XCircle, color: '#f87171' },
-    { label: 'Data Freshness SLA', value: `${slaMet}/${slaTotal}`, icon: ShieldCheck, color: '#34d399', badge: slaTotal ? 'On time' : undefined },
+    { label: 'Failed Runs', value: failedRuns, icon: XCircle, color: '#f87171' },
+    {
+      label: 'Data Freshness SLA',
+      value: `${slaMet}/${slaTotal}`,
+      icon: ShieldCheck,
+      color: slaColor,
+      badge: slaBadge,
+      sub: useTables ? 'Fresh tables / all tables (DB scan)' : 'Layers bronze/silver/gold',
+    },
     { label: 'Avg ETL Duration', value: avgDur, icon: Clock, color: '#fbbf24', sub: '+0s vs baseline' },
-    { label: 'ML-Detected Anomalies', value: '0', icon: Brain, color: '#a78bfa' },
+    { label: 'ML-Detected Anomalies', value: formatMlAnomalyCount(data), icon: Brain, color: '#a78bfa' },
   ];
 }
 
@@ -44,7 +89,9 @@ export default function ETLStats({ data, loading }: ETLStatsProps) {
     data &&
     (data.jobs?.length ||
       data.errors?.length ||
+      (typeof data.failedRunsTotal === 'number' && Number.isFinite(data.failedRunsTotal)) ||
       data.freshness ||
+      (typeof data.mlAnomalyCount === 'number' && Number.isFinite(data.mlAnomalyCount)) ||
       (data.throughput && (data.throughput.overall_throughput != null || data.throughput.throughput?.length)));
   const stats = hasMetrics ? buildStats(data) : defaultStats;
   return (
@@ -71,7 +118,14 @@ export default function ETLStats({ data, loading }: ETLStatsProps) {
             <div className="flex items-baseline gap-2">
               <span className="font-body text-2xl font-bold text-[#e0e8f5]">{s.value}</span>
               {s.badge && (
-                <span className="font-mono text-[8px] font-bold text-[#34d399] bg-[#0d3a2a] border border-[#1a5c40] px-1.5 py-0.5 rounded-md tracking-wider">
+                <span
+                  className="font-mono text-[8px] font-bold px-1.5 py-0.5 rounded-md tracking-wider border"
+                  style={{
+                    color: s.color,
+                    background: `${s.color}18`,
+                    borderColor: `${s.color}45`,
+                  }}
+                >
                   {s.badge}
                 </span>
               )}

@@ -69,14 +69,88 @@ function formatLastUpdatedLine(ds: {
   return typeof rel === 'string' ? rel : '—';
 }
 
-function signalSummary(ds: Record<string, unknown>): string {
-  const s = String(ds.activity_signal ?? '');
-  const col = ds.source_column;
-  if (s === 'etl') return 'Clock source: latest ETL completion (monitoring.job_runs)';
-  if (s === 'column' && col != null && String(col)) return `Clock source: MAX(${String(col)}) on table rows`;
-  if (s === 'pg_stat') return 'Clock source: pg_stat_user_tables (analyze / vacuum)';
-  if (s === 'unknown') return 'Clock source: none — age unknown';
-  return 'Clock source: —';
+function humanAgePhrase(hours: number): string {
+  if (!Number.isFinite(hours) || hours < 0) return 'an unknown amount of time';
+  if (hours < 1) return 'less than an hour';
+  if (hours < 24) {
+    const h = Math.round(hours);
+    return h <= 1 ? 'about one hour' : `about ${h} hours`;
+  }
+  const d = Math.round(hours / 24);
+  return d === 1 ? 'about one day' : `about ${d} days`;
+}
+
+/** Short plain-language line for table cards (non-technical). */
+function plainCardPreview(
+  ds: Record<string, unknown>,
+  freshMaxH: number,
+  staleMaxH: number,
+): string | null {
+  const status = String(ds.status ?? 'unknown');
+  const ha = typeof ds.hours_ago === 'number' && Number.isFinite(ds.hours_ago) ? ds.hours_ago : null;
+  if (status === 'fresh') {
+    return `Current—within the last ${freshMaxH} hour${freshMaxH === 1 ? '' : 's'}.`;
+  }
+  if (status === 'stale') {
+    return ha != null
+      ? `Activity ${humanAgePhrase(ha)} ago—in the check-soon window.`
+      : `Roughly ${freshMaxH}–${staleMaxH}h since activity—in the check-soon window.`;
+  }
+  if (status === 'outdated') {
+    return ha != null
+      ? `Stale ${humanAgePhrase(ha)}—schedule a refresh or check delays.`
+      : `Past ${staleMaxH}h without a fresher signal—check the pipeline.`;
+  }
+  if (status === 'unknown') {
+    return 'Last change time unknown.';
+  }
+  return null;
+}
+
+/** One compact plain-language sentence for the modal. */
+function plainWhyOneSentence(
+  ds: Record<string, unknown>,
+  freshMaxH: number,
+  staleMaxH: number,
+): string {
+  const status = String(ds.status ?? 'unknown');
+  const ha = typeof ds.hours_ago === 'number' && Number.isFinite(ds.hours_ago) ? ds.hours_ago : null;
+  const sig = String(ds.activity_signal ?? '');
+  const col = ds.source_column != null ? String(ds.source_column) : '';
+
+  if ((sig === 'unknown' || sig === '') && ha == null && status === 'unknown') {
+    return 'No reliable last-change time—shown as unknown.';
+  }
+
+  let basis = 'pipeline and stored dates';
+  if (sig === 'etl' && col === 'pipeline') basis = 'last pipeline run';
+  else if (sig === 'etl') basis = 'last load job';
+  else if (sig === 'column')
+    basis = col && col !== 'pipeline' ? `latest “${col}” on rows` : 'latest row dates';
+  else if (sig === 'pg_stat') basis = 'database stats (fallback)';
+
+  if (status === 'fresh' && ha != null) {
+    return `Up to date: ${basis} puts last activity ${humanAgePhrase(ha)} ago—within ${freshMaxH} hours.`;
+  }
+  if (status === 'fresh') {
+    return `Up to date: within ${freshMaxH} hours (${basis}).`;
+  }
+  if (status === 'stale' && ha != null) {
+    return `Needs review: ${basis} puts last activity ${humanAgePhrase(ha)} ago (${freshMaxH}–${staleMaxH}h band).`;
+  }
+  if (status === 'stale') {
+    return `Needs review: between ${freshMaxH} and ${staleMaxH} hours since last signal (${basis}).`;
+  }
+  if (status === 'outdated' && ha != null) {
+    return `Overdue: ${basis} puts last activity ${humanAgePhrase(ha)} ago—past ${staleMaxH} hours.`;
+  }
+  if (status === 'outdated') {
+    return `Overdue: past ${staleMaxH} hours (${basis}).`;
+  }
+  if (status === 'unknown') {
+    return `Unknown: not enough signal from ${basis} to mark current.`;
+  }
+  return plainCardPreview(ds, freshMaxH, staleMaxH) ?? 'Could not summarize this row.';
 }
 
 export default function DataFreshness({ data, loading, onRefetch }: DataFreshnessProps) {
@@ -85,10 +159,10 @@ export default function DataFreshness({ data, loading, onRefetch }: DataFreshnes
 
   /** Full JSON body from GET /monitoring/etl/freshness (includes `datasets`, `freshness` layers, counts). */
   const payload = data?.freshness;
-
-  const freshMaxH = Number(payload?.sla_policy?.fresh_max_hours) > 0 ? Number(payload?.sla_policy?.fresh_max_hours) : 1;
-  const staleMaxH = Number(payload?.sla_policy?.stale_max_hours) > 0 ? Number(payload?.sla_policy?.stale_max_hours) : 6;
-  const policyDescription = typeof payload?.sla_policy?.description === 'string' ? payload.sla_policy.description : undefined;
+  const freshMaxH =
+    Number(payload?.sla_policy?.fresh_max_hours) > 0 ? Number(payload?.sla_policy?.fresh_max_hours) : 1;
+  const staleMaxH =
+    Number(payload?.sla_policy?.stale_max_hours) > 0 ? Number(payload?.sla_policy?.stale_max_hours) : 6;
 
   const rawDatasets = useMemo(() => {
     const fromList = Array.isArray(payload?.datasets) ? payload.datasets : [];
@@ -190,6 +264,7 @@ export default function DataFreshness({ data, loading, onRefetch }: DataFreshnes
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {datasetList.map((ds: any, i: number) => {
             const status = ds?.status ?? 'unknown';
+            const whyPreview = plainCardPreview(ds as Record<string, unknown>, freshMaxH, staleMaxH);
             const isBreach = status === 'outdated';
             const stripeColor =
               status === 'fresh'
@@ -254,8 +329,19 @@ export default function DataFreshness({ data, loading, onRefetch }: DataFreshnes
                       : (ds?.records ?? ds?.record_count ?? '—')}
                   </span>
                 </div>
+                {whyPreview ? (
+                  <p
+                    className="font-body text-[12px] text-[#b8c8df] mt-2 leading-snug line-clamp-3 border-t border-[#1e2540]/80 pt-2"
+                    title={whyPreview}
+                  >
+                    <span className="text-[#5a6a8a] block mb-0.5 font-body text-[10px]">Reason</span>
+                    {whyPreview}
+                  </p>
+                ) : null}
               </div>
-              <p className="font-mono text-[8px] text-[#4a5a7a] mt-2">Click for the reason behind this status</p>
+              <p className="font-body text-[11px] text-[#6a7a9a] mt-2">
+                {whyPreview ? 'Tap for a fuller explanation' : 'Tap for details'}
+              </p>
             </motion.button>
           );})}
         </div>
@@ -309,13 +395,12 @@ export default function DataFreshness({ data, loading, onRefetch }: DataFreshnes
                     <Database size={16} className="text-[#3ecfff]" />
                     {selected.layer ? `${String(selected.layer)}.${String(selected.name)}` : String(selected.name)}
                   </h4>
-                  <p className="font-mono text-[10px] text-[#6a7a9a] mt-1">
+                  <p className="font-body text-[11px] text-[#9aaccc] mt-1 leading-snug">
                     Status: <span style={{ color: selectedStripe }}>{STATUS_LABEL[selectedStatus] ?? selectedStatus}</span>
                     {typeof selected.hours_ago === 'number' && (
-                      <> · {Number(selected.hours_ago).toFixed(2)}h since activity</>
+                      <> — last activity was {humanAgePhrase(Number(selected.hours_ago))} ago</>
                     )}
                   </p>
-                  <p className="font-mono text-[9px] text-[#8a9aba] mt-1.5 leading-snug">{signalSummary(selected)}</p>
                 </div>
                 <button
                   type="button"
@@ -327,37 +412,26 @@ export default function DataFreshness({ data, loading, onRefetch }: DataFreshnes
                 </button>
               </div>
               <div className="px-5 py-4 max-h-[min(70vh,420px)] overflow-y-auto space-y-4">
-                <div className="grid grid-cols-2 gap-2 font-mono text-[10px] text-[#7a8aaa]">
+                <div className="grid grid-cols-2 gap-2 text-[10px] text-[#7a8aaa]">
                   <div className="bg-[#111628] rounded-lg p-2 border border-[#1e2540]">
-                    <span className="text-[#4a5a7a] block">Last activity (display)</span>
-                    {formatLastUpdatedLine(selected as any)}
+                    <span className="font-body text-[#4a5a7a] block mb-0.5">Shown last activity</span>
+                    <span className="font-body text-[#c4d0e0]">{formatLastUpdatedLine(selected as any)}</span>
                   </div>
                   <div className="bg-[#111628] rounded-lg p-2 border border-[#1e2540]">
-                    <span className="text-[#4a5a7a] block">Records (estimate)</span>
-                    {typeof selected.records === 'number' ? selected.records.toLocaleString() : '—'}
+                    <span className="font-body text-[#4a5a7a] block mb-0.5">Approximate rows</span>
+                    <span className="font-body text-[#c4d0e0] tabular-nums">
+                      {typeof selected.records === 'number' ? selected.records.toLocaleString() : '—'}
+                    </span>
                   </div>
                 </div>
-                {typeof selected.last_updated_at === 'string' && selected.last_updated_at.length > 4 && (
-                  <p className="font-mono text-[9px] text-[#5a6a8a] break-all">
-                    Raw timestamp: {String(selected.last_updated_at)}
+                <div className="rounded-xl border border-[#1e2540] bg-[#111628]/80 p-4">
+                  <h5 className="font-body text-sm font-semibold text-[#e8eef8] mb-2">
+                    Reason
+                  </h5>
+                  <p className="font-body text-[13px] text-[#b8c8df] leading-relaxed m-0">
+                    {plainWhyOneSentence(selected as Record<string, unknown>, freshMaxH, staleMaxH)}
                   </p>
-                )}
-                <details className="group border border-[#1e2540] rounded-lg bg-[#111628]/60">
-                  <summary className="font-mono text-[10px] text-[#6a7a9a] cursor-pointer px-3 py-2 hover:text-[#a0b0c8] list-none flex items-center gap-2">
-                    <span className="opacity-60 group-open:rotate-90 transition-transform">▸</span>
-                    How freshness works (same rules for every table)
-                  </summary>
-                  <div className="px-3 pb-3 pt-0 space-y-2 font-mono text-[10px] text-[#7a8aaa] leading-relaxed border-t border-[#1e2540]">
-                    {policyDescription ? <p>{policyDescription}</p> : null}
-                    <p>
-                      Priority when picking the clock: (1) ETL completion time for this table, (2) first matching
-                      timestamp column with a MAX value, (3) latest PostgreSQL maintenance time on the table.
-                    </p>
-                    <p>
-                      Freshness bands: Up to date if age &lt; {freshMaxH}h · Needs review if {freshMaxH}h–{staleMaxH}h · Update overdue if ≥ {staleMaxH}h.
-                    </p>
-                  </div>
-                </details>
+                </div>
               </div>
             </motion.div>
           </motion.div>

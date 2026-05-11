@@ -275,11 +275,37 @@ def _index_leading_column_already_indexed(cursor, schema: str, table: str, colum
                   WHERE a.attrelid = ix.indrelid
                     AND a.attnum = ix.indkey[0]
                     AND NOT a.attisdropped
-                    AND a.attname = %s
+                    AND lower(a.attname) = lower(%s)
               )
         ) AS ok
         """,
         (schema, table, column),
+    )
+    row = cursor.fetchone()
+    return bool(row and row.get("ok"))
+
+
+def _signature_ml_index_exists(cursor, schema: str, table: str, column: str) -> bool:
+    """
+    True if the deterministic idx_mlopt_* index name produced by apply DDL already exists on the table.
+    Covers cases where the catalog leading-column check misses (e.g. unusual indkey layouts).
+    """
+    idx_name = _index_signature_name(schema, table, column)
+    cursor.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_index ix
+            JOIN pg_class idx ON idx.oid = ix.indexrelid AND idx.relkind = 'i'
+            JOIN pg_class tbl ON tbl.oid = ix.indrelid AND tbl.relkind IN ('r', 'p', 'm')
+            JOIN pg_namespace tbl_ns ON tbl_ns.oid = tbl.relnamespace
+            WHERE tbl_ns.nspname = %s
+              AND tbl.relname = %s
+              AND idx.relname = %s
+              AND ix.indisvalid
+        ) AS ok
+        """,
+        (schema, table, idx_name),
     )
     row = cursor.fetchone()
     return bool(row and row.get("ok"))
@@ -382,12 +408,14 @@ def _filter_genuine_recommendations(conn, items: List[dict]) -> List[dict]:
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     try:
         out: List[dict] = []
+        seen_targets: set = set()
         dropped: Dict[str, int] = {
             "resolve": 0,
             "relation": 0,
             "column": 0,
             "redundant": 0,
             "evidence": 0,
+            "duplicate": 0,
         }
         for rec in items:
             ok, schema, table, col = _recommendation_resolves_to_index_target(cursor, rec, allowed)
@@ -400,8 +428,12 @@ def _filter_genuine_recommendations(conn, items: List[dict]) -> List[dict]:
             if not _validate_table_column(cursor, schema, table, col):
                 dropped["column"] += 1
                 continue
+            rtype = str(rec.get("type") or "index").lower()
             if _filter_redundant_indexes_in_recommendations_list():
                 if _index_leading_column_already_indexed(cursor, schema, table, col):
+                    dropped["redundant"] += 1
+                    continue
+                if _signature_ml_index_exists(cursor, schema, table, col):
                     dropped["redundant"] += 1
                     continue
             if min_ev > 0 and _query_logs_table_exists(cursor):
@@ -409,6 +441,11 @@ def _filter_genuine_recommendations(conn, items: List[dict]) -> List[dict]:
                 if hits < min_ev:
                     dropped["evidence"] += 1
                     continue
+            dedupe_key = (rtype, schema, table, col)
+            if dedupe_key in seen_targets:
+                dropped["duplicate"] += 1
+                continue
+            seen_targets.add(dedupe_key)
             # Normalize to qualified name so UI/clients match catalog (bare names are resolved above).
             out.append({**rec, "table": f"{schema}.{table}"})
         if not out and items:
@@ -417,7 +454,7 @@ def _filter_genuine_recommendations(conn, items: List[dict]) -> List[dict]:
             # allowlist, etc.). Log at DEBUG only — enable DEBUG to see drop breakdown.
             logger.debug(
                 "All %s optimization recommendations filtered out (resolve=%s relation=%s column=%s "
-                "redundant=%s evidence=%s). Hints: OPTIMIZATION_DDL_ALLOWED_SCHEMAS, "
+                "redundant=%s evidence=%s duplicate=%s). Hints: OPTIMIZATION_DDL_ALLOWED_SCHEMAS, "
                 "OPTIMIZATION_MIN_QUERY_EVIDENCE_HITS, OPTIMIZATION_FILTER_REDUNDANT_INDEXES=0.",
                 n,
                 dropped["resolve"],
@@ -425,6 +462,7 @@ def _filter_genuine_recommendations(conn, items: List[dict]) -> List[dict]:
                 dropped["column"],
                 dropped["redundant"],
                 dropped["evidence"],
+                dropped["duplicate"],
             )
         return out
     finally:
@@ -3028,7 +3066,9 @@ def _apply_optimization_sync(recommendation_id: str, body: Dict[str, Any]) -> di
                     status_code=403,
                     detail=f"Current role cannot CREATE in schema {sch!r} (required for index DDL).",
                 )
-            if _index_leading_column_already_indexed(cur, sch, rel, idx_col):
+            if _index_leading_column_already_indexed(cur, sch, rel, idx_col) or _signature_ml_index_exists(
+                cur, sch, rel, idx_col
+            ):
                 # Keep already-optimized rows visible in Optimization History and suppress
                 # re-showing in pending recommendations by recording an audit event.
                 tbl_display = f"{sch}.{rel}"
@@ -3061,11 +3101,12 @@ def _apply_optimization_sync(recommendation_id: str, body: Dict[str, Any]) -> di
                     f"A valid index on {sch}.{rel} already leads with column {idx_col!r}; "
                     "no new DDL required."
                 )
-                with get_db_connection() as sat_conn:
-                    sat_cur = sat_conn.cursor(cursor_factory=RealDictCursor)
+                # Persist audit row in its own transaction so it survives failures in status update.
+                with get_db_connection() as audit_conn:
+                    audit_cur = audit_conn.cursor(cursor_factory=RealDictCursor)
                     try:
                         _insert_apply_event(
-                            sat_cur,
+                            audit_cur,
                             recommendation_id=recommendation_id,
                             rtype=rtype,
                             table_name=tbl_display,
@@ -3082,9 +3123,20 @@ def _apply_optimization_sync(recommendation_id: str, body: Dict[str, Any]) -> di
                             created_index_name="",
                             apply_outcome="already_satisfied",
                         )
-                        _maybe_mark_index_recommendation_applied(sat_cur, recommendation_id)
                     finally:
-                        sat_cur.close()
+                        audit_cur.close()
+                try:
+                    with get_db_connection() as mark_conn:
+                        mark_cur = mark_conn.cursor(cursor_factory=RealDictCursor)
+                        try:
+                            _maybe_mark_index_recommendation_applied(mark_cur, recommendation_id)
+                        finally:
+                            mark_cur.close()
+                except Exception as mark_ex:
+                    logger.warning(
+                        "Could not mark recommendation applied after already_satisfied audit (row still stored): %s",
+                        mark_ex,
+                    )
                 return {
                     "recommendation_id": recommendation_id,
                     "status": "already_satisfied",
@@ -3183,9 +3235,21 @@ def _apply_optimization_sync(recommendation_id: str, body: Dict[str, Any]) -> di
                 created_index_name=index_name,
                 apply_outcome="applied",
             )
-            _maybe_mark_index_recommendation_applied(cursor, recommendation_id)
         finally:
             cursor.close()
+
+    try:
+        with get_db_connection() as mark_conn:
+            mark_cur = mark_conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                _maybe_mark_index_recommendation_applied(mark_cur, recommendation_id)
+            finally:
+                mark_cur.close()
+    except Exception as mark_ex:
+        logger.warning(
+            "Could not mark recommendation applied after DDL audit insert (audit row still stored): %s",
+            mark_ex,
+        )
 
     logger.info(
         "Implement: created index %s for recommendation_id=%s",
@@ -3432,6 +3496,32 @@ def _safe_int_metric(v: Any) -> int:
         return 0
 
 
+def _reconcile_query_perf_latencies_ms(metric: Dict[str, Any]) -> Tuple[float, float, float, float, float]:
+    """
+    Weighted mean from SQL should match Σ(total_exec_time_ms)/Σ(calls). When AVG is orders of
+    magnitude smaller than that ratio (mixed snapshot units / legacy rows), use the totals-derived
+    mean so Avg matches real workload time. Percentiles stay as returned by SQL.
+    """
+    ec = max(0, _safe_int_metric(metric.get("execution_count")))
+    total_ms = float(metric.get("total_execution_time") or 0)
+    sql_avg = float(metric.get("avg_execution_time") or 0)
+    implied_ms = (total_ms / ec) if ec > 0 else 0.0
+
+    p50 = float(metric.get("p50_execution_time") or 0)
+    p95 = float(metric.get("p95_execution_time") or 0)
+    p99 = float(metric.get("p99_execution_time") or 0)
+
+    if ec <= 0 or implied_ms <= 0 or sql_avg <= 0:
+        return sql_avg, p50, p95, p99, total_ms
+
+    ratio = implied_ms / sql_avg
+    if ratio >= 100.0:
+        return implied_ms, p50, p95, p99, total_ms
+    if ratio <= 0.01:
+        return sql_avg, p50, p95, p99, total_ms
+    return sql_avg, p50, p95, p99, total_ms
+
+
 def _query_perf_aggregate_rows_to_metrics_list(metrics: List[Any]) -> List[dict]:
     """Turn GROUP BY query_hash rows into API metric dicts (seconds, cache rate)."""
     result: List[dict] = []
@@ -3452,22 +3542,23 @@ def _query_perf_aggregate_rows_to_metrics_list(metrics: List[Any]) -> List[dict]
                 sample_log_id = int(sl)
             except (TypeError, ValueError):
                 sample_log_id = None
+        avg_ms, p50_ms, p95_ms, p99_ms, total_ms_out = _reconcile_query_perf_latencies_ms(metric)
         result.append(
             {
                 "query_id": metric.get("query_id", ""),
                 "query_hash": metric.get("query_hash", ""),
                 "execution_count": _safe_int_metric(metric.get("execution_count")),
                 # Seconds for dashboards; *_ms mirrors SQL so manual DB sums match the UI.
-                "avg_execution_time_ms": _optional_float_ms(metric.get("avg_execution_time")),
-                "avg_execution_time": _safe_float_ms_to_seconds(metric.get("avg_execution_time")),
-                "p50_execution_time_ms": _optional_float_ms(metric.get("p50_execution_time")),
-                "p50_execution_time": _safe_float_ms_to_seconds(metric.get("p50_execution_time")),
-                "p95_execution_time_ms": _optional_float_ms(metric.get("p95_execution_time")),
-                "p95_execution_time": _safe_float_ms_to_seconds(metric.get("p95_execution_time")),
-                "p99_execution_time_ms": _optional_float_ms(metric.get("p99_execution_time")),
-                "p99_execution_time": _safe_float_ms_to_seconds(metric.get("p99_execution_time")),
-                "total_execution_time_ms": _optional_float_ms(metric.get("total_execution_time")),
-                "total_execution_time": _safe_float_ms_to_seconds(metric.get("total_execution_time")),
+                "avg_execution_time_ms": _optional_float_ms(avg_ms),
+                "avg_execution_time": _safe_float_ms_to_seconds(avg_ms),
+                "p50_execution_time_ms": _optional_float_ms(p50_ms),
+                "p50_execution_time": _safe_float_ms_to_seconds(p50_ms),
+                "p95_execution_time_ms": _optional_float_ms(p95_ms),
+                "p95_execution_time": _safe_float_ms_to_seconds(p95_ms),
+                "p99_execution_time_ms": _optional_float_ms(p99_ms),
+                "p99_execution_time": _safe_float_ms_to_seconds(p99_ms),
+                "total_execution_time_ms": _optional_float_ms(total_ms_out),
+                "total_execution_time": _safe_float_ms_to_seconds(total_ms_out),
                 "cache_hit_rate": cache_hit,
                 "last_executed": last_executed,
                 "sample_log_id": sample_log_id,
@@ -3494,8 +3585,8 @@ def _batch_attach_query_text_previews_multi(cursor: Any, *groups: List[dict]) ->
                 SELECT DISTINCT ON (query_hash)
                     query_hash::text AS qh,
                     COALESCE(
-                        NULLIF(BTRIM(query_template), ''),
-                        NULLIF(BTRIM(query_text), '')
+                        NULLIF(BTRIM(query_text), ''),
+                        NULLIF(BTRIM(query_template), '')
                     ) AS qpreview
                 FROM ml_optimization.query_logs
                 WHERE query_hash::text = ANY(%s)
@@ -3514,6 +3605,138 @@ def _batch_attach_query_text_previews_multi(cursor: Any, *groups: List[dict]) ->
         for item in g:
             qid = str(item.get("query_id") or "")
             item["query_text_preview"] = preview_by_qid.get(qid, "")
+
+
+def _candidate_query_hashes_from_metric_groups(*groups: List[List[dict]]) -> List[str]:
+    """Stable union of ``query_id`` values across 1d / 7d / long slices (preserves first-seen order)."""
+    out: List[str] = []
+    seen: set = set()
+    for g in groups:
+        for row in g:
+            qid = str(row.get("query_id") or row.get("query_hash") or "").strip()
+            if qid and qid not in seen:
+                seen.add(qid)
+                out.append(qid)
+    return out
+
+
+def _refill_triple_query_perf_slices(
+    cursor: Any,
+    agg_from_recent_sql: str,
+    candidates: List[str],
+    ts1: Any,
+    ts7: Any,
+    end_ex: Any,
+) -> Tuple[List[dict], List[dict], List[dict]]:
+    """
+    Re-aggregate metrics for *exactly* ``candidates`` per window so slices stay aligned.
+
+    Independent ``LIMIT`` + ``ORDER BY total_execution_time`` per window drops hashes from other
+    windows; without this refill, clients that join rows by ``query_id`` reuse one window's averages.
+    """
+    if not candidates:
+        return [], [], []
+
+    q_1d = (
+        f"{agg_from_recent_sql} "
+        "WHERE query_hash::text = ANY(%s) AND collected_at >= %s AND collected_at < %s "
+        "GROUP BY query_hash ORDER BY total_execution_time DESC NULLS LAST"
+    )
+    cursor.execute(q_1d, [candidates, ts1, end_ex])
+    r1 = _query_perf_aggregate_rows_to_metrics_list(cursor.fetchall())
+
+    q_7d = (
+        f"{agg_from_recent_sql} "
+        "WHERE query_hash::text = ANY(%s) AND collected_at >= %s AND collected_at < %s "
+        "GROUP BY query_hash ORDER BY total_execution_time DESC NULLS LAST"
+    )
+    cursor.execute(q_7d, [candidates, ts7, end_ex])
+    r7 = _query_perf_aggregate_rows_to_metrics_list(cursor.fetchall())
+
+    # Temp table ``_analytics_bundle_recent`` is already restricted to the long window.
+    q_long = (
+        f"{agg_from_recent_sql} "
+        "WHERE query_hash::text = ANY(%s) "
+        "GROUP BY query_hash ORDER BY total_execution_time DESC NULLS LAST"
+    )
+    cursor.execute(q_long, [candidates])
+    r_long = _query_perf_aggregate_rows_to_metrics_list(cursor.fetchall())
+
+    return r1, r7, r_long
+
+
+def _refill_triple_query_perf_slices_from_query_logs(
+    cursor: Any,
+    candidates: List[str],
+    s1: str,
+    s7: str,
+    s_long: str,
+    end_date: str,
+) -> Tuple[List[dict], List[dict], List[dict]]:
+    """
+    Same alignment as ``_refill_triple_query_perf_slices``, but scanning ``ml_optimization.query_logs``.
+
+    Used when the temp-table analytics path fails and we fall back to three independent top-N queries.
+    """
+    if not candidates:
+        return [], [], []
+
+    ts1, end_ex = _date_strings_to_utc_ts_bounds(s1, end_date)
+    ts7, _ = _date_strings_to_utc_ts_bounds(s7, end_date)
+    ts_long, _ = _date_strings_to_utc_ts_bounds(s_long, end_date)
+
+    agg_from_logs = """
+        SELECT
+            query_hash::text AS query_id,
+            query_hash::text AS query_hash,
+            SUM(COALESCE(calls, 0))::bigint AS execution_count,
+            (SUM(COALESCE(total_exec_time_ms, mean_exec_time_ms * NULLIF(calls, 0)::numeric, 0)::numeric)
+                / NULLIF(SUM(COALESCE(calls, 0))::numeric, 0)) AS avg_execution_time,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY (
+                COALESCE(total_exec_time_ms, mean_exec_time_ms * NULLIF(calls, 0)::numeric, 0)::numeric
+                / NULLIF(COALESCE(calls, 0)::numeric, 0)
+            )) AS p50_execution_time,
+            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY (
+                COALESCE(total_exec_time_ms, mean_exec_time_ms * NULLIF(calls, 0)::numeric, 0)::numeric
+                / NULLIF(COALESCE(calls, 0)::numeric, 0)
+            )) AS p95_execution_time,
+            PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY (
+                COALESCE(total_exec_time_ms, mean_exec_time_ms * NULLIF(calls, 0)::numeric, 0)::numeric
+                / NULLIF(COALESCE(calls, 0)::numeric, 0)
+            )) AS p99_execution_time,
+            SUM(COALESCE(total_exec_time_ms, mean_exec_time_ms * NULLIF(calls, 0), 0)) AS total_execution_time,
+            MAX(collected_at) AS last_executed,
+            SUM(COALESCE(shared_blks_hit, 0))::double precision AS sum_blks_hit,
+            SUM(COALESCE(shared_blks_read, 0))::double precision AS sum_blks_read,
+            (array_agg(log_id ORDER BY collected_at DESC) FILTER (WHERE log_id IS NOT NULL))[1] AS sample_log_id
+        FROM ml_optimization.query_logs
+    """
+
+    q_1d = (
+        f"{agg_from_logs} "
+        "WHERE query_hash::text = ANY(%s) AND collected_at >= %s AND collected_at < %s "
+        "GROUP BY query_hash ORDER BY total_execution_time DESC NULLS LAST"
+    )
+    cursor.execute(q_1d, [candidates, ts1, end_ex])
+    r1 = _query_perf_aggregate_rows_to_metrics_list(cursor.fetchall())
+
+    q_7d = (
+        f"{agg_from_logs} "
+        "WHERE query_hash::text = ANY(%s) AND collected_at >= %s AND collected_at < %s "
+        "GROUP BY query_hash ORDER BY total_execution_time DESC NULLS LAST"
+    )
+    cursor.execute(q_7d, [candidates, ts7, end_ex])
+    r7 = _query_perf_aggregate_rows_to_metrics_list(cursor.fetchall())
+
+    q_long = (
+        f"{agg_from_logs} "
+        "WHERE query_hash::text = ANY(%s) AND collected_at >= %s AND collected_at < %s "
+        "GROUP BY query_hash ORDER BY total_execution_time DESC NULLS LAST"
+    )
+    cursor.execute(q_long, [candidates, ts_long, end_ex])
+    r_long = _query_perf_aggregate_rows_to_metrics_list(cursor.fetchall())
+
+    return r1, r7, r_long
 
 
 def _build_analytics_triple_query_performance(
@@ -3603,6 +3826,12 @@ def _build_analytics_triple_query_performance(
             r7 = run_slice("WHERE collected_at >= %s AND collected_at < %s", [ts7, end_ex])
             r_long = run_slice("", [])
 
+            candidates = _candidate_query_hashes_from_metric_groups(r1, r7, r_long)
+            if candidates:
+                r1, r7, r_long = _refill_triple_query_perf_slices(
+                    cur, agg_from_recent, candidates, ts1, ts7, end_ex
+                )
+
             _batch_attach_query_text_previews_multi(cur, r1, r7, r_long)
 
             rollups = _analytics_rollups_from_temp(cur, ts1, ts7, end_ex)
@@ -3623,12 +3852,27 @@ def _build_analytics_triple_query_performance(
             exc_info=True,
         )
         with get_db_connection() as conn:
+            cur_fb = conn.cursor(cursor_factory=RealDictCursor)
             p1 = _build_query_performance_payload(conn, s1, end_date, None, limit, query_logs_exists=True)
             p7 = _build_query_performance_payload(conn, s7, end_date, None, limit, query_logs_exists=True)
             p30 = _build_query_performance_payload(conn, s_long, end_date, None, limit, query_logs_exists=True)
             ts1, end_ex = _date_strings_to_utc_ts_bounds(s1, end_date)
             ts7, _ = _date_strings_to_utc_ts_bounds(s7, end_date)
             rollups = _analytics_rollups_from_query_logs_table(conn, ts1, ts7, end_ex)
+
+            m1 = list(p1.get("metrics") or p1.get("queries") or [])
+            m7 = list(p7.get("metrics") or p7.get("queries") or [])
+            m30 = list(p30.get("metrics") or p30.get("queries") or [])
+            cand = _candidate_query_hashes_from_metric_groups(m1, m7, m30)
+            if cand:
+                r1, r7, r_long = _refill_triple_query_perf_slices_from_query_logs(
+                    cur_fb, cand, s1, s7, s_long, end_date
+                )
+                _batch_attach_query_text_previews_multi(cur_fb, r1, r7, r_long)
+                p1 = {**p1, "queries": r1, "metrics": r1, "total": len(r1)}
+                p7 = {**p7, "queries": r7, "metrics": r7, "total": len(r7)}
+                p30 = {**p30, "queries": r_long, "metrics": r_long, "total": len(r_long)}
+            cur_fb.close()
         meta = {
             "degraded_mode": True,
             "degraded_reason": "temp_table_path_failed_using_per_window_fallback",

@@ -34,7 +34,6 @@ export default function WorkloadPatterns({
     }
     return deriveWorkloadHourlyExecutions(q);
   }, [hourlyFromDb, q]);
-  const hourlySourceDb = Array.isArray(hourlyFromDb) && hourlyFromDb.length === 24;
   const localHourBuckets = useMemo(() => {
     const out = Array(24).fill(0);
     const offsetH = Math.round(-new Date().getTimezoneOffset() / 60);
@@ -118,9 +117,9 @@ export default function WorkloadPatterns({
 
       <div className="px-3">
         <div className="mb-1 flex items-center gap-3">
-          <p className="font-body text-[10px] text-ink-faint">
+          {/* <p className="font-body text-[10px] text-ink-faint">
             {hourlySourceDb ? 'Workload trend from source rollups' : 'Workload trend from available records'}
-          </p>
+          </p> */}
         </div>
         <div className="mb-1 flex items-center gap-3">
           <span className="inline-flex items-center gap-1 text-[10px] text-ink-faint">
@@ -133,7 +132,7 @@ export default function WorkloadPatterns({
           </span>
           <span className="inline-flex items-center gap-1 text-[10px] text-ink-faint">
             <span className="w-2.5 h-2.5 rounded-full bg-topo-5/90 border border-topo-4/60" />
-            Peak pointer (hover for details)
+            Peak pointer
           </span>
         </div>
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">

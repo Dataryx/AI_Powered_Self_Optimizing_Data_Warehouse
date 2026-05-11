@@ -7,9 +7,15 @@ export type QueryPerfRow = {
   p50_execution_time?: number;
   p95_execution_time?: number;
   p99_execution_time?: number;
+  avg_execution_time_ms?: number;
+  p50_execution_time_ms?: number;
+  p95_execution_time_ms?: number;
+  p99_execution_time_ms?: number;
   /** Σ ``calls`` in the time window for this ``query_hash`` (not log-row count). */
   execution_count?: number;
   total_execution_time?: number;
+  /** Σ ``total_exec_time_ms`` in the window (API mirrors SQL). */
+  total_execution_time_ms?: number;
   cache_hit_rate?: number | null;
   last_executed?: string | null;
   query_text_preview?: string;
@@ -24,6 +30,50 @@ export const SLOW_P95_SEC = 2.0;
 function num(v: unknown, fallback = 0): number {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/** Σ wall time in ms for this query hash in the window (prefer API ms when non-zero; else seconds). */
+export function totalExecutionTimeMs(q: QueryPerfRow): number {
+  const msRaw = q.total_execution_time_ms;
+  const sec = num(q.total_execution_time);
+  if (msRaw != null && Number.isFinite(Number(msRaw))) {
+    const ms = Math.max(0, Number(msRaw));
+    if (ms > 0) return ms;
+    // Payloads sometimes send 0 in *_ms while total_execution_time (seconds) holds Σ wall time.
+    if (sec > 0) return sec * 1000;
+    return 0;
+  }
+  return Math.max(0, sec * 1000);
+}
+
+/** Mean latency per call in seconds — aligns with Query Performance panel. */
+export function avgLatencySeconds(q: QueryPerfRow): number {
+  if (q.avg_execution_time_ms != null && Number.isFinite(Number(q.avg_execution_time_ms))) {
+    return Number(q.avg_execution_time_ms) / 1000;
+  }
+  const ec = Math.max(0, Math.floor(num(q.execution_count)));
+  const tms = q.total_execution_time_ms;
+  if (ec > 0 && tms != null && Number.isFinite(Number(tms))) {
+    return Number(tms) / ec / 1000;
+  }
+  return num(q.avg_execution_time);
+}
+
+export function percentileLatencySeconds(q: QueryPerfRow, which: 'p50' | 'p95' | 'p99'): number {
+  const ms =
+    which === 'p50'
+      ? q.p50_execution_time_ms
+      : which === 'p95'
+        ? q.p95_execution_time_ms
+        : q.p99_execution_time_ms;
+  if (ms != null && Number.isFinite(Number(ms))) return Number(ms) / 1000;
+  const sec =
+    which === 'p50'
+      ? q.p50_execution_time
+      : which === 'p95'
+        ? q.p95_execution_time
+        : q.p99_execution_time;
+  return num(sec);
 }
 
 function percentile(sorted: number[], p: number): number {
@@ -176,8 +226,8 @@ export function deriveQueryAggregates(queries: QueryPerfRow[]): {
   const p95s: number[] = [];
   const points = rows.map((q) => {
     const c = Math.max(0, Math.floor(num(q.execution_count)));
-    const avg = num(q.avg_execution_time);
-    const p95 = num(q.p95_execution_time);
+    const avg = avgLatencySeconds(q);
+    const p95 = percentileLatencySeconds(q, 'p95');
     totalExec += c;
     weightedSum += avg * c;
     avgs.push(avg);
@@ -234,7 +284,7 @@ export function weightedMeanCacheHitRate(queries: QueryPerfRow[]): number | null
 
 export function topQueriesByTotalTime(queries: QueryPerfRow[], n = 8): QueryPerfRow[] {
   const rows = [...(Array.isArray(queries) ? queries : [])];
-  rows.sort((a, b) => num(b.total_execution_time) - num(a.total_execution_time));
+  rows.sort((a, b) => totalExecutionTimeMs(b) - totalExecutionTimeMs(a));
   return rows.slice(0, n);
 }
 

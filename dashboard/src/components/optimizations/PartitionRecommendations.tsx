@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { LayoutGrid, CheckCircle, RefreshCw, Layers, Zap, Loader2, DatabaseZap } from 'lucide-react';
 import { api, formatOptimizationApplyError } from '../../services/api';
 import { recommendationApplySnapshot } from '../../utils/recommendationApplySnapshot';
@@ -30,27 +30,65 @@ function partitionColumnLabel(r: any): string | undefined {
   return typeof col === 'string' ? col.trim() : undefined;
 }
 
+/** Strip `-- Template:` and other `--` comment lines from API DDL for display. */
+function formatPartitionSqlForDisplay(sql: string): string {
+  const normalized = sql.replace(/\r\n/g, '\n');
+  return normalized
+    .split('\n')
+    .map((line) => {
+      const t = line.trim();
+      if (/^--\s*Template:\s*/i.test(t)) {
+        return t.replace(/^--\s*Template:\s*/i, '').trim();
+      }
+      return line.trimEnd();
+    })
+    .filter((line) => {
+      const t = line.trim();
+      if (!t) return false;
+      if (/^--/.test(t)) return false;
+      return true;
+    })
+    .join('\n')
+    .trim();
+}
+
 export default function PartitionRecommendations({ data, loading, onRefetch }: PartitionRecommendationsProps) {
   const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [implementNotice, setImplementNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [dismissedIds, setDismissedIds] = useState<Record<string, true>>({});
   const [applyFeedback, setApplyFeedback] = useState<{ id: string; ok: boolean; msg: string } | null>(null);
-  const [optimisticallyApplied, setOptimisticallyApplied] = useState<Record<string, true>>({});
-  /** 409 Conflict: index on partition key already exists — expected, not a failure. */
-  const [alreadySatisfied, setAlreadySatisfied] = useState<Record<string, true>>({});
+
+  useEffect(() => {
+    if (!implementNotice) return;
+    const t = setTimeout(() => setImplementNotice(null), 8000);
+    return () => clearTimeout(t);
+  }, [implementNotice]);
 
   useEffect(() => {
     if (!applyFeedback) return;
-    const t = setTimeout(() => setApplyFeedback(null), 6000);
+    const t = setTimeout(() => setApplyFeedback(null), 8000);
     return () => clearTimeout(t);
   }, [applyFeedback]);
 
   const allRecs = Array.isArray(data?.recommendations) ? data.recommendations : [];
-  const recs = allRecs.filter((r: any) => r?.type === 'partition');
+  const recs = useMemo(() => {
+    return allRecs
+      .filter((r: any) => r?.type === 'partition')
+      .filter((r: any) => {
+        const sid = r?.recommendation_id as string | undefined;
+        if (!sid) return true;
+        if (dismissedIds[sid]) return false;
+        if (String(r?.status ?? '').toLowerCase() === 'applied') return false;
+        return true;
+      });
+  }, [allRecs, dismissedIds]);
   const hasPlaceholderSql = (sql: unknown): boolean =>
     typeof sql === 'string' && /(\{\{.+?\}\}|<[^>]+>|TODO|TBD)/i.test(sql);
 
   async function handleImplementPartition(rec: any) {
     const id = rec?.recommendation_id;
     if (!id || applyingId) return;
+    const label = rec?.table ?? rec?.table_name ?? 'table';
     setApplyingId(id);
     setApplyFeedback(null);
     try {
@@ -60,15 +98,11 @@ export default function PartitionRecommendations({ data, loading, onRefetch }: P
         recommendationApplySnapshot(rec as Record<string, unknown>),
       );
       if (res.outcome === 'already_satisfied') {
-        setAlreadySatisfied((prev) => ({ ...prev, [id]: true }));
-        setApplyFeedback({
-          id,
+        setDismissedIds((p) => ({ ...p, [id]: true }));
+        setImplementNotice({
           ok: true,
-          msg:
-            res.detail ||
-            'This optimization is already in place, so no new change was needed.',
+          text: `Partition strategy already satisfied for ${label} — recorded in Optimization History below.`,
         });
-        onRefetch?.();
         return;
       }
       if (res.persisted !== true) {
@@ -80,15 +114,14 @@ export default function PartitionRecommendations({ data, loading, onRefetch }: P
         });
         return;
       }
-      setOptimisticallyApplied((prev) => ({ ...prev, [id]: true }));
-      setApplyFeedback({
-        id,
+      setDismissedIds((p) => ({ ...p, [id]: true }));
+      const name = res.created_index_name ? String(res.created_index_name) : '';
+      setImplementNotice({
         ok: true,
-        msg: res.created_index_name
-          ? `Created index ${res.created_index_name}. See Optimization History for details.`
-          : 'Optimization applied successfully. See Optimization History for details.',
+        text: name
+          ? `Partition index implemented (${name}) for ${label}. See Optimization History below.`
+          : `Partition strategy applied for ${label}. See Optimization History below.`,
       });
-      onRefetch?.();
     } catch (e) {
       setApplyFeedback({
         id,
@@ -127,6 +160,19 @@ export default function PartitionRecommendations({ data, loading, onRefetch }: P
         </div>
       </div>
 
+      {implementNotice && (
+        <div
+          className={`mx-5 mb-1 flex items-start gap-2 rounded-lg border px-3 py-2 text-left ${
+            implementNotice.ok
+              ? 'border-topo-2/45 bg-topo-2/10 text-topo-2'
+              : 'border-red-500/35 bg-red-500/10 text-red-600 dark:text-red-400'
+          }`}
+          role="status"
+        >
+          <CheckCircle size={14} className="shrink-0 mt-0.5 opacity-90" aria-hidden />
+          <p className="font-mono text-[11px] leading-snug m-0">{implementNotice.text}</p>
+        </div>
+      )}
       {/* Content */}
       <div className="px-5 pb-4">
         {loading && recs.length === 0 && (
@@ -147,11 +193,8 @@ export default function PartitionRecommendations({ data, loading, onRefetch }: P
               const priorityColor = priority === 'high' ? 'bg-amber-500/20 text-amber-400' : priority === 'medium' ? 'bg-topo-2/20 text-topo-2' : 'bg-ink-faint/20 text-ink-muted';
               const srcBadge = recommendationSourceBadge(r?.recommendation_source);
               const rid = r?.recommendation_id as string | undefined;
-              const isApplied =
-                Boolean(rid && optimisticallyApplied[rid]) ||
-                String(r?.status ?? '').toLowerCase() === 'applied';
-              const isAlreadySatisfied = Boolean(rid && alreadySatisfied[rid]);
-              const implementDone = isApplied || isAlreadySatisfied;
+              const rawSql = typeof r?.sql_statement === 'string' ? r.sql_statement.trim() : '';
+              const displayPartitionSql = rawSql ? formatPartitionSqlForDisplay(rawSql) : '';
               return (
                 <motion.div
                   key={r?.recommendation_id ?? i}
@@ -193,9 +236,9 @@ export default function PartitionRecommendations({ data, loading, onRefetch }: P
                       <span className="font-mono text-[10px] text-ink-muted">Columns: {r.columns.join(', ')}</span>
                     </div>
                   )}
-                  {typeof r?.sql_statement === 'string' && r.sql_statement.trim() && !hasPlaceholderSql(r.sql_statement) ? (
+                  {rawSql && !hasPlaceholderSql(r.sql_statement) && displayPartitionSql ? (
                     <pre className="mt-2 p-2 rounded-lg bg-surface-alt border border-contour font-mono text-[9px] text-ink-soft overflow-x-auto whitespace-pre-wrap break-all">
-                      {r.sql_statement}
+                      {displayPartitionSql}
                     </pre>
                   ) : (
                     <p className="mt-2 font-mono text-[10px] text-ink-faint">
@@ -213,28 +256,14 @@ export default function PartitionRecommendations({ data, loading, onRefetch }: P
                   <div className="mt-3 pt-3 border-t border-contour/60 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <button
                       type="button"
-                      disabled={!rid || applyingId === rid || implementDone}
+                      disabled={!rid || applyingId === rid}
                       onClick={() => handleImplementPartition(r)}
-                      className={`inline-flex items-center justify-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wide px-3 py-2 rounded-lg border transition-all disabled:pointer-events-none ${
-                        implementDone
-                          ? 'bg-slate-800/60 text-teal-300/95 border-teal-500/35'
-                          : 'bg-gradient-to-br from-sky-500 to-indigo-600 text-white border-sky-400/40 shadow-md shadow-indigo-950/25 hover:from-sky-400 hover:to-indigo-500 hover:shadow-indigo-900/30 disabled:opacity-45'
-                      }`}
+                      className="inline-flex items-center justify-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wide px-3 py-2 rounded-lg border transition-all disabled:pointer-events-none bg-gradient-to-br from-sky-500 to-indigo-600 text-white border-sky-400/40 shadow-md shadow-indigo-950/25 hover:from-sky-400 hover:to-indigo-500 hover:shadow-indigo-900/30 disabled:opacity-45"
                     >
                       {applyingId === rid ? (
                         <>
                           <Loader2 size={14} className="animate-spin shrink-0 text-sky-100" />
                           Applying…
-                        </>
-                      ) : isAlreadySatisfied ? (
-                        <>
-                          <CheckCircle size={14} className="shrink-0 text-sky-400" />
-                          Already indexed
-                        </>
-                      ) : isApplied ? (
-                        <>
-                          <CheckCircle size={14} className="shrink-0 text-teal-400" />
-                          Applied
                         </>
                       ) : (
                         <>
